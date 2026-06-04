@@ -1,0 +1,37 @@
+# Build artifacts
+/build/
+/install/
+/log/
+/logs/
+/devel/
+/.catkin_tools/
+/cmake_build/
+
+# Colcon / catkin generated files
+compile_commands.json
+CTestTestfile.cmake
+Testing/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# OS / temp files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Runtime outputs and local debug files
+*.log
+*.csv
+
+# Local model artifacts placed during deployment/debug
+*.pt
+*.pth
+*.onnx
