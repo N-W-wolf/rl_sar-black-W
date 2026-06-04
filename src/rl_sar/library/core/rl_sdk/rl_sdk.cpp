@@ -5,6 +5,9 @@
 
 #include "rl_sdk.hpp"
 
+template <typename T>
+std::vector<T> ReadVectorFromYaml(const YAML::Node &node);
+
 void RL::StateController(const RobotState<double>* state, RobotCommand<double>* command)
 {
     auto updateState = [&](std::shared_ptr<FSMState> statePtr)
@@ -156,6 +159,101 @@ void RL::InitRL(std::string robot_path)
     this->InitObservations();
     this->InitOutputs();
     this->InitControl();
+}
+
+torch::Tensor RL::ReadPolicyDefaultDofPos(std::string robot_path)
+{
+    std::string config_path = std::string(CMAKE_CURRENT_SOURCE_DIR) + "/policy/" + robot_path + "/config.yaml";
+    YAML::Node config = YAML::LoadFile(config_path)[robot_path];
+    return torch::tensor(ReadVectorFromYaml<double>(config["default_dof_pos"])).view({1, -1});
+}
+
+void RL::ClearOutputQueues()
+{
+    torch::Tensor unused;
+    while (this->output_dof_pos_queue.try_pop(unused)) {}
+    while (this->output_dof_vel_queue.try_pop(unused)) {}
+    while (this->output_dof_tau_queue.try_pop(unused)) {}
+}
+
+bool RL::RequestPolicySwitch(const std::string &target_config)
+{
+    bool publish_done = false;
+    bool publish_value = false;
+    bool accepted = false;
+    {
+        std::lock_guard<std::mutex> lock(this->policy_switch_mutex);
+        if (target_config.empty())
+        {
+            return false;
+        }
+        if (this->policy_switch_in_progress)
+        {
+            return false;
+        }
+        if (!this->policy_switch_in_progress && target_config == this->config_name)
+        {
+            this->policy_switch_requested = false;
+            this->pending_config_name.clear();
+            this->policy_switch_done = true;
+            this->policy_switch_success = true;
+            publish_done = true;
+            publish_value = true;
+            accepted = false;
+        }
+        else
+        {
+            this->pending_config_name = target_config;
+            this->policy_switch_requested = true;
+            this->policy_switch_done = false;
+            this->policy_switch_success = false;
+            publish_done = true;
+            publish_value = false;
+            accepted = true;
+        }
+    }
+    if (publish_done)
+    {
+        this->PublishPolicySwitchDone(publish_value);
+    }
+    return accepted;
+}
+
+bool RL::HasPolicySwitchRequest()
+{
+    std::lock_guard<std::mutex> lock(this->policy_switch_mutex);
+    return this->policy_switch_requested;
+}
+
+bool RL::BeginPolicySwitch(std::string &target_config)
+{
+    std::lock_guard<std::mutex> lock(this->policy_switch_mutex);
+    if (!this->policy_switch_requested || this->pending_config_name.empty())
+    {
+        return false;
+    }
+    target_config = this->pending_config_name;
+    this->policy_switch_requested = false;
+    this->policy_switch_in_progress = true;
+    this->policy_switch_done = false;
+    this->policy_switch_success = false;
+    return true;
+}
+
+void RL::FinishPolicySwitch(bool success)
+{
+    {
+        std::lock_guard<std::mutex> lock(this->policy_switch_mutex);
+        this->policy_switch_in_progress = false;
+        this->policy_switch_requested = false;
+        this->policy_switch_done = success;
+        this->policy_switch_success = success;
+        if (success)
+        {
+            this->pending_config_name.clear();
+        }
+    }
+    this->PublishPolicySwitchDone(success);
 }
 
 void RL::ComputeOutput(const torch::Tensor &actions, torch::Tensor &output_dof_pos, torch::Tensor &output_dof_vel, torch::Tensor &output_dof_tau)

@@ -41,6 +41,7 @@
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/joy.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <std_srvs/srv/empty.hpp>
 #include <rcl_interfaces/srv/get_parameters.hpp>
@@ -63,6 +64,7 @@ private:
     torch::Tensor Forward() override;
     void GetState(RobotState<double> *state) override;
     void SetCommand(const RobotCommand<double> *command) override;
+    void PublishPolicySwitchDone(bool done) override;
     void RunModel();
     void RobotControl();
 
@@ -109,10 +111,12 @@ private:
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_subscriber;
     rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_subscriber;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr debug_key_subscriber;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr policy_config_subscriber;
     rclcpp::Client<std_srvs::srv::Empty>::SharedPtr gazebo_pause_physics_client;
     rclcpp::Client<std_srvs::srv::Empty>::SharedPtr gazebo_unpause_physics_client;
     rclcpp::Client<std_srvs::srv::Empty>::SharedPtr gazebo_reset_world_client;
     rclcpp::Publisher<robot_msgs::msg::RobotCommand>::SharedPtr robot_command_publisher;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr policy_switch_done_publisher;
     rclcpp::Subscription<robot_msgs::msg::RobotState>::SharedPtr robot_state_subscriber;
     rclcpp::Client<rcl_interfaces::srv::GetParameters>::SharedPtr param_client;
     void GazeboImuCallback(const sensor_msgs::msg::Imu::SharedPtr msg);
@@ -120,6 +124,7 @@ private:
     void RobotStateCallback(const robot_msgs::msg::RobotState::SharedPtr msg);
     void JoyCallback(const sensor_msgs::msg::Joy::SharedPtr msg);
     void DebugKeyCallback(const std_msgs::msg::String::SharedPtr msg);
+    void PolicyConfigCallback(const std_msgs::msg::String::SharedPtr msg);
 #endif
 
     // others

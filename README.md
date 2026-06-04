@@ -107,10 +107,11 @@ src/rl_sar/policy/<ROBOT>/<CONFIG>/
 - `../base.yaml`
 - 对应机器人 FSM
 
-例如 `blackW/himloco`：
+例如 `blackW/himloco` 和 `blackW/himloco_down`：
 
 - [base.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/base.yaml)
-- [config.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/himloco/config.yaml)
+- [himloco/config.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/himloco/config.yaml)
+- [himloco_down/config.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/himloco_down/config.yaml)
 - [fsm.hpp](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/fsm.hpp)
 
 ## 配置原则
@@ -195,6 +196,7 @@ ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: '0'}"
 ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: '1'}"
 ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: 'p'}"
 ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: 'space'}"
+ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: 't'}"
 ```
 
 关闭 `rl_sar` 这组 launch 子进程：
@@ -220,6 +222,53 @@ ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: 'shutdown'}"
 | `Q/E` | 偏航速度 |
 | `Space` | 清零速度命令 |
 | `N` | 切换导航模式 |
+| `T` | `blackW` 下在 `himloco` 和 `himloco_down` 间切换 |
+
+## 手柄控制
+
+常用手柄键位如下：
+
+| 手柄 | 作用 |
+|---|---|
+| `A` | 从当前初始姿态切到 `GetUp` |
+| `B` | 回到初始姿态 |
+| `RB + DPadUp` | 基础 locomotion |
+| `LB + X` | 电机 passive 模式 |
+| `RB + Y` | 重置仿真 |
+| `RB + X` | 暂停/继续仿真 |
+| `X` | 切换导航模式 |
+| `Y` | `blackW` 下在 `himloco` 和 `himloco_down` 间切换 |
+| `LY/LX/RX` | 前后、左右、偏航速度 |
+
+手柄轴输入带死区过滤：`x/y/yaw` 绝对值小于 `0.03` 时会置为 `0`，用于避免摇杆中位附近的小幅抖动。键盘输入和 `/cmd_vel` 不做这个死区过滤。
+
+## 运行时模型切换
+
+`blackW` 支持在运行中切换 `himloco` 和 `himloco_down`。由于两个模型的默认姿态不同，切换时状态机会先从当前关节位置平滑过渡到目标模型的 `default_dof_pos`，再加载目标 `policy.pt` 并进入模型控制。
+
+支持以下触发方式：
+
+```bash
+# 键盘 T 或手柄 Y：toggle
+
+# debug_key：toggle
+ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: 't'}"
+
+# 显式指定目标模型
+ros2 topic pub --once /rl_sim/policy_config std_msgs/msg/String "{data: 'himloco_down'}"
+ros2 topic pub --once /rl_sim/policy_config std_msgs/msg/String "{data: 'himloco'}"
+
+# topic toggle
+ros2 topic pub --once /rl_sim/policy_config std_msgs/msg/String "{data: 'toggle'}"
+```
+
+切换完成状态通过 `/rl_sim/policy_switch_done` 发布：
+
+```bash
+ros2 topic echo /rl_sim/policy_switch_done
+```
+
+`false` 表示正在切换或切换未完成，`true` 表示已经完成姿态过渡并成功加载目标模型。
 
 ## 与 black_mujoco 联调
 
@@ -318,3 +367,4 @@ mat1 and mat2 shapes cannot be multiplied (1x64 and 76x512)
 - [rl_sim.launch.py](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/launch/rl_sim.launch.py)
 - [blackW base.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/base.yaml)
 - [blackW himloco config.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/himloco/config.yaml)
+- [blackW himloco_down config.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/himloco_down/config.yaml)

@@ -7,9 +7,18 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 
 namespace
 {
+constexpr double kLinearCommandDeadband = 0.2;
+constexpr double kYawCommandDeadband = 0.2;
+
+double ApplyDeadband(double value, double deadband)
+{
+    return std::fabs(value) < deadband ? 0.0 : value;
+}
+
 std::string NormalizeDebugInput(std::string input)
 {
     input.erase(input.begin(), std::find_if(input.begin(), input.end(), [](unsigned char ch) { return !std::isspace(ch); }));
@@ -77,6 +86,16 @@ bool TrySetKeyboardFromDebugInput(Control &control, const std::string &input)
     }
 
     return false;
+}
+
+bool IsBlackWPolicyConfig(const std::string &input)
+{
+    return input == "himloco" || input == "himloco_down";
+}
+
+std::string ToggleBlackWPolicyConfig(const std::string &current)
+{
+    return current == "himloco_down" ? "himloco" : "himloco_down";
 }
 } // namespace
 
@@ -216,6 +235,9 @@ RL_Sim::RL_Sim()
     // publisher
     this->robot_command_publisher = this->create_publisher<robot_msgs::msg::RobotCommand>(
         this->ros_namespace + "robot_joint_controller/command", rclcpp::SystemDefaultsQoS());
+    this->policy_switch_done_publisher = this->create_publisher<std_msgs::msg::Bool>(
+        "/rl_sim/policy_switch_done", rclcpp::QoS(1).transient_local().reliable());
+    this->PublishPolicySwitchDone(true);
 
     // subscriber
     this->cmd_vel_subscriber = this->create_subscription<geometry_msgs::msg::Twist>(
@@ -229,6 +251,10 @@ RL_Sim::RL_Sim()
     this->debug_key_subscriber = this->create_subscription<std_msgs::msg::String>(
         "/rl_sim/debug_key", rclcpp::SystemDefaultsQoS(),
         [this] (const std_msgs::msg::String::SharedPtr msg) {this->DebugKeyCallback(msg);}
+    );
+    this->policy_config_subscriber = this->create_subscription<std_msgs::msg::String>(
+        "/rl_sim/policy_config", rclcpp::SystemDefaultsQoS(),
+        [this] (const std_msgs::msg::String::SharedPtr msg) {this->PolicyConfigCallback(msg);}
     );
     this->gazebo_imu_subscriber = this->create_subscription<sensor_msgs::msg::Imu>(
         "/imu", rclcpp::SystemDefaultsQoS(), [this] (const sensor_msgs::msg::Imu::SharedPtr msg) {this->GazeboImuCallback(msg);}
@@ -277,6 +303,11 @@ RL_Sim::RL_Sim()
               << "Debug topic ready: /rl_sim/debug_key "
               << "(example: ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String \"{data: '0'}\")"
               << std::endl;
+    std::cout << LOGGER::INFO
+              << "Policy switch topic ready: /rl_sim/policy_config "
+              << "(example: ros2 topic pub --once /rl_sim/policy_config std_msgs/msg/String \"{data: 'himloco_down'}\")"
+              << std::endl;
+    std::cout << LOGGER::INFO << "Policy switch done topic: /rl_sim/policy_switch_done" << std::endl;
 }
 
 RL_Sim::~RL_Sim()
@@ -434,6 +465,19 @@ void RL_Sim::SetCommand(const RobotCommand<double> *command)
 #endif
 }
 
+void RL_Sim::PublishPolicySwitchDone(bool done)
+{
+#if defined(USE_ROS2)
+    if (!this->policy_switch_done_publisher)
+    {
+        return;
+    }
+    std_msgs::msg::Bool msg;
+    msg.data = done;
+    this->policy_switch_done_publisher->publish(msg);
+#endif
+}
+
 void RL_Sim::RobotControl()
 {
     if (this->control.current_keyboard == Input::Keyboard::R || this->control.current_gamepad == Input::Gamepad::RB_Y)
@@ -556,6 +600,25 @@ void RL_Sim::DebugKeyCallback(const std_msgs::msg::String::SharedPtr msg)
         return;
     }
 
+    if (input == "toggle_policy" || input == "policy_toggle")
+    {
+        const std::string target_config = ToggleBlackWPolicyConfig(this->config_name);
+        if (this->RequestPolicySwitch(target_config))
+        {
+            std::cout << LOGGER::INFO << "Policy switch requested by debug topic: " << target_config << std::endl;
+        }
+        return;
+    }
+
+    if (IsBlackWPolicyConfig(input))
+    {
+        if (this->RequestPolicySwitch(input))
+        {
+            std::cout << LOGGER::INFO << "Policy switch requested by debug topic: " << input << std::endl;
+        }
+        return;
+    }
+
     if (TrySetKeyboardFromDebugInput(this->control, input))
     {
         std::cout << LOGGER::INFO << "Debug key injected: " << input << std::endl;
@@ -563,6 +626,31 @@ void RL_Sim::DebugKeyCallback(const std_msgs::msg::String::SharedPtr msg)
     }
 
     std::cout << LOGGER::WARNING << "Unknown debug key command: " << msg->data << std::endl;
+}
+
+void RL_Sim::PolicyConfigCallback(const std_msgs::msg::String::SharedPtr msg)
+{
+    const std::string input = NormalizeDebugInput(msg->data);
+    if (input.empty())
+    {
+        return;
+    }
+
+    const std::string target_config = input == "toggle" ? ToggleBlackWPolicyConfig(this->config_name) : input;
+    if (!IsBlackWPolicyConfig(target_config))
+    {
+        std::cout << LOGGER::WARNING << "Unsupported policy_config switch target: " << msg->data << std::endl;
+        return;
+    }
+
+    if (this->RequestPolicySwitch(target_config))
+    {
+        std::cout << LOGGER::INFO << "Policy switch requested: " << target_config << std::endl;
+    }
+    else
+    {
+        std::cout << LOGGER::INFO << "Policy switch target already active: " << target_config << std::endl;
+    }
 }
 
 void RL_Sim::GazeboImuCallback(const sensor_msgs::msg::Imu::SharedPtr msg)
@@ -631,9 +719,9 @@ void RL_Sim::JoyCallback(
     if (this->joy_msg.buttons[5] && this->joy_msg.axes[6] < 0) this->control.SetGamepad(Input::Gamepad::RB_DPadLeft);
     if (this->joy_msg.buttons[4] && this->joy_msg.buttons[5]) this->control.SetGamepad(Input::Gamepad::LB_RB);
 
-    this->control.x = this->joy_msg.axes[1] * 2; // LY
-    this->control.y = this->joy_msg.axes[0] * 1; // LX
-    this->control.yaw = this->joy_msg.axes[3] * 3.0; // RX
+    this->control.x = ApplyDeadband(this->joy_msg.axes[1] * 2, kLinearCommandDeadband); // LY
+    this->control.y = ApplyDeadband(this->joy_msg.axes[0] * 1, kLinearCommandDeadband); // LX
+    this->control.yaw = ApplyDeadband(this->joy_msg.axes[3] * 3.0, kYawCommandDeadband); // RX
 }
 
 #if defined(USE_ROS1)
@@ -654,6 +742,11 @@ void RL_Sim::RunModel()
 {
     if (this->rl_init_done && simulation_running)
     {
+        std::lock_guard<std::mutex> lock(this->model_mutex);
+        if (!this->rl_init_done)
+        {
+            return;
+        }
         this->episode_length_buf += 1;
         //this->obs.lin_vel = torch::tensor({{this->vel.linear.x, this->vel.linear.y, this->vel.linear.z}});
         this->obs.ang_vel = torch::tensor(this->robot_state.imu.gyroscope).unsqueeze(0);

@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <algorithm>
 #include <tbb/concurrent_queue.h>
+#include <mutex>
 
 #include <yaml-cpp/yaml.h>
 #include "fsm_core.hpp"
@@ -78,7 +79,7 @@ namespace Input
         Up, Down, Left, Right
     };
 
-    // Recommend: A-GetUp B-GetDown X-ToggleNavMode Y-None
+    // Recommend: A-GetUp B-GetDown X-ToggleNavMode Y-PolicyToggle
     //            RB_Y-SimReset RB_X-SimToggle
     //            LB_A-MotorEnable LB_B-MotorDisable LB_X-MotorPassive
     //            RB_DPadUp-BaseLocomotion RB_DPadOthers/LB_DPadOthers-Skills(7)
@@ -192,6 +193,13 @@ public:
     void InitOutputs();
     void InitControl();
     void InitRL(std::string robot_path);
+    torch::Tensor ReadPolicyDefaultDofPos(std::string robot_path);
+    void ClearOutputQueues();
+    bool RequestPolicySwitch(const std::string &target_config);
+    bool HasPolicySwitchRequest();
+    bool BeginPolicySwitch(std::string &target_config);
+    void FinishPolicySwitch(bool success);
+    virtual void PublishPolicySwitchDone(bool done) {}
 
     // rl functions
     virtual torch::Tensor Forward() = 0;
@@ -225,6 +233,13 @@ public:
     std::string ang_vel_type = "ang_vel_body";  // "ang_vel_world" or "ang_vel_body"
     unsigned long long episode_length_buf = 0;
     float motion_length = 0.0;
+    std::mutex model_mutex;
+    std::mutex policy_switch_mutex;
+    std::string pending_config_name;
+    bool policy_switch_requested = false;
+    bool policy_switch_in_progress = false;
+    bool policy_switch_done = true;
+    bool policy_switch_success = true;
 
     // protect func
     void TorqueProtect(torch::Tensor origin_output_dof_tau);
