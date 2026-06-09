@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 blackW/himloco_down:
-  model_name: "policy.pt"
+  model_name: "policy_0607_2.pt"
   num_observations: 57
   observations: ["commands","ang_vel", "gravity_vec", "dof_pos", "dof_vel", "actions"]
   observations_history: [0,1,2,3,4,5]  # 0 is the latest observation
@@ -54,8 +54,8 @@ blackW/himloco_down:
                   33.5, 33.5, 33.5, 33.5,
                   33.5, 33.5, 33.5, 33.5,
                   33.5, 33.5, 33.5, 33.5]
-  default_dof_pos: [0.35, 1.35, -2.4, 0.0,
-                    -0.35, -1.35, 2.4, 0.0,
-                    -0.35, 1.35, -2.4, 0.0,
-                    0.35, -1.35, 2.4, 0.0]
+  default_dof_pos: [0.35, 1.35, -2.55, 0.0,
+                    -0.35, -1.35, 2.55, 0.0,
+                    -0.35, 1.35, -2.55, 0.0,
+                    0.35, -1.35, 2.55, 0.0]
   joint_mapping: [4, 5, 6, 7, 0, 1, 2, 3, 12, 13, 14, 15, 8, 9, 10, 11]
