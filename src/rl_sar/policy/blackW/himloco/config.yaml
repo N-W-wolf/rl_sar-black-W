@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 blackW/himloco:
-  model_name: "policy_0612_2.pt"
+  model_name: "policy_0613_1.pt"
   num_observations: 57
   observations: ["commands","ang_vel", "gravity_vec", "dof_pos", "dof_vel", "actions"]
   observations_history: [0,1,2,3,4,5]  # 0 is the latest observation
@@ -15,10 +15,10 @@ blackW/himloco:
                        100.0, 100.0, 100.0, 100.0,
                        100.0, 100.0, 100.0, 100.0,
                        100.0, 100.0, 100.0, 100.0]
-  rl_kp: [60.0, 60.0, 60.0, 0.0,
-          60.0, 60.0, 60.0, 0.0,
-          60.0, 60.0, 60.0, 0.0,
-          60.0, 60.0, 60.0, 0.0]
+  rl_kp: [50.0, 50.0, 50.0, 0.0,
+          50.0, 50.0, 50.0, 0.0,
+          50.0, 50.0, 50.0, 0.0,
+          50.0, 50.0, 50.0, 0.0]
   rl_kd: [1.2, 1.2, 1.2, 1.0,
           1.2, 1.2, 1.2, 1.0,
           1.2, 1.2, 1.2, 1.0,
