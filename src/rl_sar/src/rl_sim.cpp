@@ -781,13 +781,19 @@ void RL_Sim::RunModel()
 
         // this->TorqueProtect(this->output_dof_tau);
 
+// #ifdef CSV_LOGGER
+//         torch::Tensor tau_est = torch::zeros({1, this->params.num_of_dofs});
+//         for (int i = 0; i < this->params.num_of_dofs; ++i)
+//         {
+//             tau_est[0][i] = this->joint_efforts[this->params.joint_controller_names[i]];
+//         }
+//         this->CSVLogger(this->output_dof_tau, tau_est, this->obs.dof_pos, this->output_dof_pos, this->obs.dof_vel);
+// #endif
 #ifdef CSV_LOGGER
-        torch::Tensor tau_est = torch::zeros({1, this->params.num_of_dofs});
-        for (int i = 0; i < this->params.num_of_dofs; ++i)
-        {
-            tau_est[0][i] = this->joint_efforts[this->params.joint_controller_names[i]];
-        }
-        this->CSVLogger(this->output_dof_tau, tau_est, this->obs.dof_pos, this->output_dof_pos, this->obs.dof_vel);
+        torch::Tensor tau_est = torch::tensor(this->robot_state.motor_state.tau_est)
+                                      .narrow(0, 0, this->params.num_of_dofs)
+                                      .unsqueeze(0);
+        this->CSVLogger(this->output_dof_tau, tau_est, this->obs.dof_pos, this->output_dof_pos, this->obs.dof_vel, this->output_dof_vel);
 #endif
     }
 }

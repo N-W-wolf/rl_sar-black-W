@@ -9,6 +9,7 @@
 // #define PLOT
 // #define CSV_LOGGER
 #define USE_ROS2
+#define CSV_LOGGER
 
 #include "rl_sdk.hpp"
 #include "observation_buffer.hpp"

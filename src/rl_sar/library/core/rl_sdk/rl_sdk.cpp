@@ -563,13 +563,14 @@ void RL::CSVInit(std::string robot_path)
     for(int i = 0; i < this->params.num_of_dofs; ++i) { file << "joint_pos_" << i << ","; }
     for(int i = 0; i < this->params.num_of_dofs; ++i) { file << "joint_pos_target_" << i << ","; }
     for(int i = 0; i < this->params.num_of_dofs; ++i) { file << "joint_vel_" << i << ","; }
+    for(int i = 0; i < this->params.num_of_dofs; ++i) { file << "joint_vel_target_" << i << ","; }
 
     file << std::endl;
 
     file.close();
 }
 
-void RL::CSVLogger(torch::Tensor torque, torch::Tensor tau_est, torch::Tensor joint_pos, torch::Tensor joint_pos_target, torch::Tensor joint_vel)
+void RL::CSVLogger(torch::Tensor torque, torch::Tensor tau_est, torch::Tensor joint_pos, torch::Tensor joint_pos_target, torch::Tensor joint_vel, torch::Tensor joint_vel_target)
 {
     std::ofstream file(csv_filename.c_str(), std::ios_base::app);
 
@@ -578,6 +579,7 @@ void RL::CSVLogger(torch::Tensor torque, torch::Tensor tau_est, torch::Tensor jo
     for(int i = 0; i < this->params.num_of_dofs; ++i) { file << joint_pos[0][i].item<double>() << ","; }
     for(int i = 0; i < this->params.num_of_dofs; ++i) { file << joint_pos_target[0][i].item<double>() << ","; }
     for(int i = 0; i < this->params.num_of_dofs; ++i) { file << joint_vel[0][i].item<double>() << ","; }
+    for(int i = 0; i < this->params.num_of_dofs; ++i) { file << joint_vel_target[0][i].item<double>() << ","; }
 
     file << std::endl;
 
