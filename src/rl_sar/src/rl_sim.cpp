@@ -109,8 +109,6 @@ RL_Sim::RL_Sim()
     this->ang_vel_type = "ang_vel_body";
     this->ros_namespace = this->get_namespace();
     this->config_name = this->declare_parameter<std::string>("policy_config", "");
-    this->policy_config_cycle = this->declare_parameter<std::vector<std::string>>(
-        "policy_config_cycle", std::vector<std::string>{"himloco", "himloco_down"});
     // get params from param_node
     param_client = this->create_client<rcl_interfaces::srv::GetParameters>("/param_node/get_parameters");
     while (!param_client->wait_for_service(std::chrono::seconds(1)))
@@ -158,6 +156,7 @@ RL_Sim::RL_Sim()
 
     // read params from yaml
     this->ReadYamlBase(this->robot_name);
+    this->ReadPolicySwitchConfig(this->robot_name);
     printf("Robot Name: %s\n", this->robot_name.c_str());
 
     // auto load FSM by robot_name
@@ -629,7 +628,7 @@ void RL_Sim::DebugKeyCallback(const std_msgs::msg::String::SharedPtr msg)
         return;
     }
 
-    if (this->IsPolicyConfigAvailable(input))
+    if (this->IsPolicyConfigAllowed(input))
     {
         if (this->RequestPolicySwitch(input))
         {
@@ -661,7 +660,7 @@ void RL_Sim::PolicyConfigCallback(const std_msgs::msg::String::SharedPtr msg)
         std::cout << LOGGER::WARNING << "No available policy_config for switch cycle." << std::endl;
         return;
     }
-    if (!this->IsPolicyConfigAvailable(target_config))
+    if (!this->IsPolicyConfigAllowed(target_config))
     {
         std::cout << LOGGER::WARNING << "Unsupported policy_config switch target: " << msg->data << std::endl;
         return;

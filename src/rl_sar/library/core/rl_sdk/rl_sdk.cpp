@@ -234,6 +234,17 @@ bool RL::IsPolicyConfigAvailable(const std::string &config_name) const
     return PathIsRegularFile(config_path);
 }
 
+bool RL::IsPolicyConfigAllowed(const std::string &config_name) const
+{
+    if (!this->IsPolicyConfigAvailable(config_name))
+    {
+        return false;
+    }
+
+    return std::find(this->policy_config_cycle.begin(), this->policy_config_cycle.end(), config_name) !=
+        this->policy_config_cycle.end();
+}
+
 std::vector<std::string> RL::ListPolicyConfigs() const
 {
     std::vector<std::string> configs;
@@ -280,10 +291,6 @@ std::string RL::GetNextPolicyConfig() const
 
     if (cycle.empty())
     {
-        cycle = this->ListPolicyConfigs();
-    }
-    if (cycle.empty())
-    {
         return "";
     }
 
@@ -302,9 +309,9 @@ bool RL::RequestPolicySwitch(const std::string &target_config)
     bool publish_value = false;
     std::string status;
     bool accepted = false;
-    if (!this->IsPolicyConfigAvailable(target_config))
+    if (!this->IsPolicyConfigAllowed(target_config))
     {
-        std::cout << LOGGER::WARNING << "Unavailable policy_config switch target: " << target_config << std::endl;
+        std::cout << LOGGER::WARNING << "Unsupported policy_config switch target: " << target_config << std::endl;
         return false;
     }
     {
@@ -653,6 +660,55 @@ void RL::ReadYamlBase(std::string robot_path)
     this->params.joint_names = ReadVectorFromYaml<std::string>(config["joint_names"]);
     this->params.joint_controller_names = ReadVectorFromYaml<std::string>(config["joint_controller_names"]);
     this->params.joint_mapping = ReadVectorFromYaml<int>(config["joint_mapping"]);
+}
+
+void RL::ReadPolicySwitchConfig(std::string robot_path)
+{
+    this->policy_config_cycle.clear();
+
+    const std::string config_path = std::string(CMAKE_CURRENT_SOURCE_DIR) + "/policy/" + robot_path + "/policy_switch.yaml";
+    if (!PathIsRegularFile(config_path))
+    {
+        std::cout << LOGGER::WARNING << "Policy switch config not found: " << config_path
+                  << ". Using default cycle: himloco -> himloco_down." << std::endl;
+        this->policy_config_cycle = {"himloco", "himloco_down"};
+        return;
+    }
+
+    YAML::Node root = YAML::LoadFile(config_path);
+    YAML::Node config = root[robot_path] ? root[robot_path] : root;
+    YAML::Node cycle = config["policy_config_cycle"];
+    if (!cycle || !cycle.IsSequence())
+    {
+        std::cout << LOGGER::WARNING << "policy_switch.yaml missing sequence field 'policy_config_cycle'. "
+                  << "Using default cycle: himloco -> himloco_down." << std::endl;
+        this->policy_config_cycle = {"himloco", "himloco_down"};
+        return;
+    }
+
+    for (const YAML::Node &node : cycle)
+    {
+        const std::string config_name = node.as<std::string>();
+        if (std::find(this->policy_config_cycle.begin(), this->policy_config_cycle.end(), config_name) !=
+            this->policy_config_cycle.end())
+        {
+            continue;
+        }
+        if (!this->IsPolicyConfigAvailable(config_name))
+        {
+            std::cout << LOGGER::WARNING << "Ignoring unavailable policy_config in policy_switch.yaml: "
+                      << config_name << std::endl;
+            continue;
+        }
+        this->policy_config_cycle.push_back(config_name);
+    }
+
+    if (this->policy_config_cycle.empty())
+    {
+        std::cout << LOGGER::WARNING << "No valid policy_config in policy_switch.yaml. "
+                  << "Using default cycle: himloco -> himloco_down." << std::endl;
+        this->policy_config_cycle = {"himloco", "himloco_down"};
+    }
 }
 
 void RL::ReadYamlRL(std::string robot_path)

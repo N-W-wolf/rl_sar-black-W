@@ -1,0 +1,9 @@
+# Copyright (c) 2024-2025 Ziqi Fan
+# SPDX-License-Identifier: Apache-2.0
+
+black:
+  # This list defines both the allowed runtime switch targets and the
+  # T/Y/toggle cycle order.
+  policy_config_cycle:
+    - himloco
+    - himloco_down

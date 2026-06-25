@@ -222,7 +222,7 @@ ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: 'shutdown'}"
 | `Q/E` | 偏航速度 |
 | `Space` | 清零速度命令 |
 | `N` | 切换导航模式 |
-| `T` | `blackW` 下按 `policy_config_cycle` 切换模型 |
+| `T` | `black`/`blackW` 下按 `policy_config_cycle` 切换模型 |
 
 ## 手柄控制
 
@@ -237,14 +237,14 @@ ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: 'shutdown'}"
 | `RB + Y` | 重置仿真 |
 | `RB + X` | 暂停/继续仿真 |
 | `X` | 切换导航模式 |
-| `Y` | `blackW` 下按 `policy_config_cycle` 切换模型 |
+| `Y` | `black`/`blackW` 下按 `policy_config_cycle` 切换模型 |
 | `LY/LX/RX` | 前后、左右、偏航速度 |
 
 手柄轴输入带死区过滤：`x/y/yaw` 绝对值小于 `0.2` 时会置为 `0`，用于避免摇杆中位附近的小幅抖动。键盘输入和 `/cmd_vel` 不做这个死区过滤。
 
 ## 运行时模型切换
 
-`blackW` 支持在运行中切换 `policy/blackW/<policy_config>` 下的模型。切换时会读取目标模型的 `default_dof_pos`：
+`black`/`blackW` 支持在运行中切换 `policy/<robot_name>/<policy_config>` 下的模型。切换时会读取目标模型的 `default_dof_pos`：
 
 - 如果目标默认姿态和当前默认姿态一致，直接重新加载目标模型。
 - 如果目标默认姿态不同，状态机会先从当前关节位置平滑过渡到目标 `default_dof_pos`，再加载目标模型并进入模型控制。
@@ -252,18 +252,16 @@ ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: 'shutdown'}"
 支持以下触发方式：
 
 ```bash
-# 键盘 T 或手柄 Y：按 policy_config_cycle 切换
+# 键盘 T 或手柄 Y：按 policy_switch.yaml 中的 policy_config_cycle 切换
 
-# 默认 cycle 是 himloco -> himloco_down。启动时可覆盖，例如：
-ros2 run rl_sar rl_sim --ros-args -p policy_config_cycle:="['himloco', 'himloco_fast', 'himloco_down']"
+# 默认 cycle 在 src/rl_sar/policy/<robot_name>/policy_switch.yaml 中配置。
 
 # debug_key：toggle
 ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: 't'}"
 
-# 显式指定目标模型，要求 policy/blackW/<name>/config.yaml 存在
+# 显式指定目标模型，要求目标模型已写入 policy_switch.yaml
 ros2 topic pub --once /rl_sim/policy_config std_msgs/msg/String "{data: 'himloco_down'}"
 ros2 topic pub --once /rl_sim/policy_config std_msgs/msg/String "{data: 'himloco'}"
-ros2 topic pub --once /rl_sim/policy_config std_msgs/msg/String "{data: 'himc'}"
 
 # topic toggle
 ros2 topic pub --once /rl_sim/policy_config std_msgs/msg/String "{data: 'toggle'}"
@@ -287,9 +285,11 @@ ros2 topic echo /rl_sim/policy_switch_status
 
 ### 新增可切换模型
 
-新增模型时，每个模型需要放在独立的 `policy/blackW/<policy_config>` 目录下。目录名 `<policy_config>` 只能包含字母、数字、下划线和短横线，并且目录内必须包含 `config.yaml` 以及该配置中 `model_name` 指向的模型文件。
+新增模型时，每个模型需要放在独立的 `policy/<robot_name>/<policy_config>` 目录下。目录名 `<policy_config>` 只能包含字母、数字、下划线和短横线，并且目录内必须包含 `config.yaml` 以及该配置中 `model_name` 指向的模型文件。
 
-以下示例新增一个模型配置 `himloco_fast`，并使其参与 `T`/手柄 `Y` 的循环切换。
+运行时允许切换的模型和 `T`/手柄 `Y`/`toggle` 的循环顺序由对应机器人的 `policy_switch.yaml` 统一配置，例如 [blackW/policy_switch.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/policy_switch.yaml) 或 [black/policy_switch.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/black/policy_switch.yaml)。发布端只需要发送 `toggle` 或配置文件中已有的模型名。
+
+以下示例以 `blackW` 为例新增一个模型配置 `himloco_fast`，并使其参与 `T`/手柄 `Y` 的循环切换。`black` 的流程相同，只需把路径和 YAML 顶层 key 中的 `blackW` 替换为 `black`。
 
 1. 创建模型目录。
 
@@ -339,14 +339,16 @@ src/rl_sar/policy/blackW/himloco_fast/policy_abc.pt
 - 如果 `himloco_fast` 和当前模型的默认姿态相同，保持两者 `default_dof_pos` 一致。切换时会直接重新加载模型，不执行姿态过渡。
 - 如果 `himloco_fast` 使用不同默认姿态，将 `default_dof_pos` 写为目标模型真实初始姿态。切换时会先平滑过渡到该姿态，再加载模型。
 
-6. 启动时配置按键循环列表。
+6. 将新模型加入切换配置。
 
-默认循环为 `himloco -> himloco_down`。如果希望 `T` 和手柄 `Y` 也切到 `himloco_fast`，启动时传入 `policy_config_cycle`：
+编辑 `src/rl_sar/policy/blackW/policy_switch.yaml`，将 `himloco_fast` 加入 `policy_config_cycle`。该列表既是允许切换的模型集合，也是按键循环顺序：
 
-```bash
-ros2 run rl_sar rl_sim --ros-args \
-  -p policy_config:=himloco \
-  -p policy_config_cycle:="['himloco', 'himloco_fast', 'himloco_down']"
+```yaml
+blackW:
+  policy_config_cycle:
+    - himloco
+    - himloco_fast
+    - himloco_down
 ```
 
 此时按键循环顺序为：
@@ -355,7 +357,7 @@ ros2 run rl_sar rl_sim --ros-args \
 himloco -> himloco_fast -> himloco_down -> himloco
 ```
 
-也可以不加入循环列表，直接通过 topic 显式切换到新模型：
+直接通过 topic 显式切换时，目标模型也必须已经写入 `policy_switch.yaml`：
 
 ```bash
 ros2 topic pub --once /rl_sim/policy_config std_msgs/msg/String "{data: 'himloco_fast'}"

@@ -197,6 +197,7 @@ public:
     void ClearOutputQueues();
     bool IsPolicyConfigNameValid(const std::string &config_name) const;
     bool IsPolicyConfigAvailable(const std::string &config_name) const;
+    bool IsPolicyConfigAllowed(const std::string &config_name) const;
     std::vector<std::string> ListPolicyConfigs() const;
     std::string GetNextPolicyConfig() const;
     bool RequestPolicySwitch(const std::string &target_config);
@@ -220,6 +221,7 @@ public:
     // yaml params
     void ReadYamlBase(std::string robot_name);
     void ReadYamlRL(std::string robot_name);
+    void ReadPolicySwitchConfig(std::string robot_name);
 
     // csv logger
     std::string csv_filename;
