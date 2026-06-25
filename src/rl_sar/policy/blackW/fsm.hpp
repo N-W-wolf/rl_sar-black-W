@@ -8,14 +8,38 @@
 
 #include "fsm_core.hpp"
 #include "rl_sdk.hpp"
+#include <cmath>
 #include <stdexcept>
 
 namespace blackw_fsm
 {
 
-inline std::string TogglePolicyConfig(const std::string &current_config)
+constexpr double kPolicyDefaultDofPosTolerance = 1e-3;
+
+inline bool RequestNextPolicySwitch(RL &rl)
 {
-    return current_config == "himloco_down" ? "himloco" : "himloco_down";
+    const std::string target_config = rl.GetNextPolicyConfig();
+    if (target_config.empty())
+    {
+        std::cout << LOGGER::WARNING << "No available policy_config for switch cycle." << std::endl;
+        return false;
+    }
+    return rl.RequestPolicySwitch(target_config);
+}
+
+inline std::string SelectPolicySwitchState(RL &rl)
+{
+    std::string target_config;
+    if (!rl.PeekPolicySwitchRequest(target_config))
+    {
+        return "";
+    }
+
+    if (rl.PolicyDefaultDofPosMatchesCurrent(target_config, kPolicyDefaultDofPosTolerance))
+    {
+        return "RLFSMStatePolicyReload";
+    }
+    return "RLFSMStatePolicyTransition";
 }
 
 class RLFSMStatePassive : public RLFSMState
@@ -128,15 +152,25 @@ public:
         {
             if (rl.control.current_keyboard == Input::Keyboard::T || rl.control.current_gamepad == Input::Gamepad::Y)
             {
-                const std::string target_config = TogglePolicyConfig(rl.config_name);
-                rl.RequestPolicySwitch(target_config);
+                const bool accepted = RequestNextPolicySwitch(rl);
                 rl.control.current_keyboard = rl.control.last_keyboard;
                 rl.control.current_gamepad = Input::Gamepad::None;
-                return "RLFSMStatePolicyTransition";
+                if (accepted)
+                {
+                    const std::string switch_state = SelectPolicySwitchState(rl);
+                    if (!switch_state.empty())
+                    {
+                        return switch_state;
+                    }
+                }
             }
             else if (rl.HasPolicySwitchRequest())
             {
-                return "RLFSMStatePolicyTransition";
+                const std::string switch_state = SelectPolicySwitchState(rl);
+                if (!switch_state.empty())
+                {
+                    return switch_state;
+                }
             }
             else if (rl.control.current_keyboard == Input::Keyboard::Num1 || rl.control.current_gamepad == Input::Gamepad::RB_DPadUp)
             {
@@ -283,15 +317,25 @@ public:
         }
         else if (rl.control.current_keyboard == Input::Keyboard::T || rl.control.current_gamepad == Input::Gamepad::Y)
         {
-            const std::string target_config = TogglePolicyConfig(rl.config_name);
-            rl.RequestPolicySwitch(target_config);
+            const bool accepted = RequestNextPolicySwitch(rl);
             rl.control.current_keyboard = rl.control.last_keyboard;
             rl.control.current_gamepad = Input::Gamepad::None;
-            return "RLFSMStatePolicyTransition";
+            if (accepted)
+            {
+                const std::string switch_state = SelectPolicySwitchState(rl);
+                if (!switch_state.empty())
+                {
+                    return switch_state;
+                }
+            }
         }
         else if (rl.HasPolicySwitchRequest())
         {
-            return "RLFSMStatePolicyTransition";
+            const std::string switch_state = SelectPolicySwitchState(rl);
+            if (!switch_state.empty())
+            {
+                return switch_state;
+            }
         }
         else if (rl.control.current_keyboard == Input::Keyboard::Num1 || rl.control.current_gamepad == Input::Gamepad::RB_DPadUp)
         {
@@ -393,6 +437,45 @@ public:
     }
 };
 
+class RLFSMStatePolicyReload : public RLFSMState
+{
+public:
+    RLFSMStatePolicyReload(RL *rl) : RLFSMState(*rl, "RLFSMStatePolicyReload") {}
+
+    bool reload_failed = false;
+    std::string target_config;
+
+    void Enter() override
+    {
+        reload_failed = false;
+        target_config.clear();
+        rl.rl_init_done = false;
+        rl.ClearOutputQueues();
+
+        if (!rl.BeginPolicySwitch(target_config))
+        {
+            reload_failed = true;
+            return;
+        }
+
+        rl.config_name = target_config;
+        std::cout << LOGGER::INFO << "Reloading policy without posture switch: " << target_config << std::endl;
+    }
+
+    void Run() override {}
+
+    void Exit() override {}
+
+    std::string CheckChange() override
+    {
+        if (reload_failed)
+        {
+            return "RLFSMStateGetUp";
+        }
+        return "RLFSMStateRL_Locomotion";
+    }
+};
+
 } // namespace blackw_fsm
 
 class BLACKWFSMFactory : public FSMFactory
@@ -412,6 +495,8 @@ public:
             return std::make_shared<blackw_fsm::RLFSMStateRL_Locomotion>(rl);
         else if (state_name == "RLFSMStatePolicyTransition")
             return std::make_shared<blackw_fsm::RLFSMStatePolicyTransition>(rl);
+        else if (state_name == "RLFSMStatePolicyReload")
+            return std::make_shared<blackw_fsm::RLFSMStatePolicyReload>(rl);
         return nullptr;
     }
     std::string GetType() const override { return "blackW"; }
@@ -422,7 +507,8 @@ public:
             "RLFSMStateGetUp",
             "RLFSMStateGetDown",
             "RLFSMStateRL_Locomotion",
-            "RLFSMStatePolicyTransition"
+            "RLFSMStatePolicyTransition",
+            "RLFSMStatePolicyReload"
         };
     }
     std::string GetInitialState() const override { return initial_state_; }

@@ -222,7 +222,7 @@ ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: 'shutdown'}"
 | `Q/E` | 偏航速度 |
 | `Space` | 清零速度命令 |
 | `N` | 切换导航模式 |
-| `T` | `blackW` 下在 `himloco` 和 `himloco_down` 间切换 |
+| `T` | `blackW` 下按 `policy_config_cycle` 切换模型 |
 
 ## 手柄控制
 
@@ -237,26 +237,33 @@ ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: 'shutdown'}"
 | `RB + Y` | 重置仿真 |
 | `RB + X` | 暂停/继续仿真 |
 | `X` | 切换导航模式 |
-| `Y` | `blackW` 下在 `himloco` 和 `himloco_down` 间切换 |
+| `Y` | `blackW` 下按 `policy_config_cycle` 切换模型 |
 | `LY/LX/RX` | 前后、左右、偏航速度 |
 
-手柄轴输入带死区过滤：`x/y/yaw` 绝对值小于 `0.03` 时会置为 `0`，用于避免摇杆中位附近的小幅抖动。键盘输入和 `/cmd_vel` 不做这个死区过滤。
+手柄轴输入带死区过滤：`x/y/yaw` 绝对值小于 `0.2` 时会置为 `0`，用于避免摇杆中位附近的小幅抖动。键盘输入和 `/cmd_vel` 不做这个死区过滤。
 
 ## 运行时模型切换
 
-`blackW` 支持在运行中切换 `himloco` 和 `himloco_down`。由于两个模型的默认姿态不同，切换时状态机会先从当前关节位置平滑过渡到目标模型的 `default_dof_pos`，再加载目标 `policy.pt` 并进入模型控制。
+`blackW` 支持在运行中切换 `policy/blackW/<policy_config>` 下的模型。切换时会读取目标模型的 `default_dof_pos`：
+
+- 如果目标默认姿态和当前默认姿态一致，直接重新加载目标模型。
+- 如果目标默认姿态不同，状态机会先从当前关节位置平滑过渡到目标 `default_dof_pos`，再加载目标模型并进入模型控制。
 
 支持以下触发方式：
 
 ```bash
-# 键盘 T 或手柄 Y：toggle
+# 键盘 T 或手柄 Y：按 policy_config_cycle 切换
+
+# 默认 cycle 是 himloco -> himloco_down。启动时可覆盖，例如：
+ros2 run rl_sar rl_sim --ros-args -p policy_config_cycle:="['himloco', 'himloco_fast', 'himloco_down']"
 
 # debug_key：toggle
 ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: 't'}"
 
-# 显式指定目标模型
+# 显式指定目标模型，要求 policy/blackW/<name>/config.yaml 存在
 ros2 topic pub --once /rl_sim/policy_config std_msgs/msg/String "{data: 'himloco_down'}"
 ros2 topic pub --once /rl_sim/policy_config std_msgs/msg/String "{data: 'himloco'}"
+ros2 topic pub --once /rl_sim/policy_config std_msgs/msg/String "{data: 'himc'}"
 
 # topic toggle
 ros2 topic pub --once /rl_sim/policy_config std_msgs/msg/String "{data: 'toggle'}"
@@ -268,7 +275,98 @@ ros2 topic pub --once /rl_sim/policy_config std_msgs/msg/String "{data: 'toggle'
 ros2 topic echo /rl_sim/policy_switch_done
 ```
 
-`false` 表示正在切换或切换未完成，`true` 表示已经完成姿态过渡并成功加载目标模型。
+`false` 表示正在切换或切换未完成，`true` 表示已经完成必要的姿态过渡并成功加载目标模型。
+
+更详细的切换状态通过 `/rl_sim/policy_switch_status` 发布：
+
+```bash
+ros2 topic echo /rl_sim/policy_switch_status
+```
+
+状态格式为 `switching <policy_config>`、`done <policy_config>`、`failed <policy_config>` 或 `ready <policy_config>`。
+
+### 新增可切换模型
+
+新增模型时，每个模型需要放在独立的 `policy/blackW/<policy_config>` 目录下。目录名 `<policy_config>` 只能包含字母、数字、下划线和短横线，并且目录内必须包含 `config.yaml` 以及该配置中 `model_name` 指向的模型文件。
+
+以下示例新增一个模型配置 `himloco_fast`，并使其参与 `T`/手柄 `Y` 的循环切换。
+
+1. 创建模型目录。
+
+```bash
+cd ~/PROJECT/RoboCon/Dog/rl_sar
+mkdir -p src/rl_sar/policy/blackW/himloco_fast
+```
+
+2. 复制一个姿态和接口最接近的现有配置作为模板。
+
+```bash
+cp src/rl_sar/policy/blackW/himloco/config.yaml \
+   src/rl_sar/policy/blackW/himloco_fast/config.yaml
+```
+
+3. 修改新配置的 YAML 顶层 key，使其和目录名一致。
+
+```yaml
+blackW/himloco_fast:
+  model_name: "policy.pt"
+  num_observations: 57
+  ...
+```
+
+如果从 `himloco` 复制模板，原始顶层 key 通常是 `blackW/himloco:`，必须改为 `blackW/himloco_fast:`。否则运行时读取 `blackW/himloco_fast/config.yaml` 时无法找到对应配置节点。
+
+4. 放入模型文件，并确认文件名和 `model_name` 一致。
+
+```bash
+cp /path/to/policy.pt src/rl_sar/policy/blackW/himloco_fast/policy.pt
+```
+
+如果配置中写的是：
+
+```yaml
+model_name: "policy_abc.pt"
+```
+
+则目录内需要存在：
+
+```bash
+src/rl_sar/policy/blackW/himloco_fast/policy_abc.pt
+```
+
+5. 按需要设置 `default_dof_pos`。
+
+- 如果 `himloco_fast` 和当前模型的默认姿态相同，保持两者 `default_dof_pos` 一致。切换时会直接重新加载模型，不执行姿态过渡。
+- 如果 `himloco_fast` 使用不同默认姿态，将 `default_dof_pos` 写为目标模型真实初始姿态。切换时会先平滑过渡到该姿态，再加载模型。
+
+6. 启动时配置按键循环列表。
+
+默认循环为 `himloco -> himloco_down`。如果希望 `T` 和手柄 `Y` 也切到 `himloco_fast`，启动时传入 `policy_config_cycle`：
+
+```bash
+ros2 run rl_sar rl_sim --ros-args \
+  -p policy_config:=himloco \
+  -p policy_config_cycle:="['himloco', 'himloco_fast', 'himloco_down']"
+```
+
+此时按键循环顺序为：
+
+```text
+himloco -> himloco_fast -> himloco_down -> himloco
+```
+
+也可以不加入循环列表，直接通过 topic 显式切换到新模型：
+
+```bash
+ros2 topic pub --once /rl_sim/policy_config std_msgs/msg/String "{data: 'himloco_fast'}"
+```
+
+切换前建议先监听状态话题：
+
+```bash
+ros2 topic echo /rl_sim/policy_switch_status
+ros2 topic echo /rl_sim/policy_switch_done
+```
 
 ## 与 black_mujoco 联调
 

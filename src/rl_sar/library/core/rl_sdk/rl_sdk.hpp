@@ -195,11 +195,18 @@ public:
     void InitRL(std::string robot_path);
     torch::Tensor ReadPolicyDefaultDofPos(std::string robot_path);
     void ClearOutputQueues();
+    bool IsPolicyConfigNameValid(const std::string &config_name) const;
+    bool IsPolicyConfigAvailable(const std::string &config_name) const;
+    std::vector<std::string> ListPolicyConfigs() const;
+    std::string GetNextPolicyConfig() const;
     bool RequestPolicySwitch(const std::string &target_config);
     bool HasPolicySwitchRequest();
+    bool PeekPolicySwitchRequest(std::string &target_config);
     bool BeginPolicySwitch(std::string &target_config);
     void FinishPolicySwitch(bool success);
+    bool PolicyDefaultDofPosMatchesCurrent(const std::string &target_config, double tolerance);
     virtual void PublishPolicySwitchDone(bool done) {}
+    virtual void PublishPolicySwitchStatus(const std::string &status) {}
 
     // rl functions
     virtual torch::Tensor Forward() = 0;
@@ -237,6 +244,7 @@ public:
     std::mutex model_mutex;
     std::mutex policy_switch_mutex;
     std::string pending_config_name;
+    std::vector<std::string> policy_config_cycle;
     bool policy_switch_requested = false;
     bool policy_switch_in_progress = false;
     bool policy_switch_done = true;

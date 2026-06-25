@@ -5,6 +5,36 @@
 
 #include "rl_sdk.hpp"
 
+#include <cctype>
+#include <cmath>
+#include <dirent.h>
+#include <sys/stat.h>
+
+namespace
+{
+std::string PolicyRootPath(const std::string &robot_name)
+{
+    return std::string(CMAKE_CURRENT_SOURCE_DIR) + "/policy/" + robot_name;
+}
+
+bool PathIsDirectory(const std::string &path)
+{
+    struct stat info;
+    return stat(path.c_str(), &info) == 0 && S_ISDIR(info.st_mode);
+}
+
+bool PathIsRegularFile(const std::string &path)
+{
+    struct stat info;
+    return stat(path.c_str(), &info) == 0 && S_ISREG(info.st_mode);
+}
+
+std::string JoinPath(const std::string &base, const std::string &name)
+{
+    return base + "/" + name;
+}
+} // namespace
+
 template <typename T>
 std::vector<T> ReadVectorFromYaml(const YAML::Node &node);
 
@@ -176,11 +206,107 @@ void RL::ClearOutputQueues()
     while (this->output_dof_tau_queue.try_pop(unused)) {}
 }
 
+bool RL::IsPolicyConfigNameValid(const std::string &config_name) const
+{
+    if (config_name.empty())
+    {
+        return false;
+    }
+
+    for (unsigned char ch : config_name)
+    {
+        if (!std::isalnum(ch) && ch != '_' && ch != '-')
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool RL::IsPolicyConfigAvailable(const std::string &config_name) const
+{
+    if (this->robot_name.empty() || !this->IsPolicyConfigNameValid(config_name))
+    {
+        return false;
+    }
+
+    const std::string config_path = JoinPath(JoinPath(PolicyRootPath(this->robot_name), config_name), "config.yaml");
+    return PathIsRegularFile(config_path);
+}
+
+std::vector<std::string> RL::ListPolicyConfigs() const
+{
+    std::vector<std::string> configs;
+    const std::string root_path = PolicyRootPath(this->robot_name);
+    DIR *dir = opendir(root_path.c_str());
+    if (!dir)
+    {
+        return configs;
+    }
+
+    struct dirent *entry = nullptr;
+    while ((entry = readdir(dir)) != nullptr)
+    {
+        const std::string name = entry->d_name;
+        if (!this->IsPolicyConfigNameValid(name))
+        {
+            continue;
+        }
+
+        const std::string config_dir = JoinPath(root_path, name);
+        const std::string config_path = JoinPath(config_dir, "config.yaml");
+        if (PathIsDirectory(config_dir) && PathIsRegularFile(config_path))
+        {
+            configs.push_back(name);
+        }
+    }
+    closedir(dir);
+
+    std::sort(configs.begin(), configs.end());
+    return configs;
+}
+
+std::string RL::GetNextPolicyConfig() const
+{
+    std::vector<std::string> cycle;
+    for (const std::string &config : this->policy_config_cycle)
+    {
+        if (std::find(cycle.begin(), cycle.end(), config) == cycle.end() &&
+            this->IsPolicyConfigAvailable(config))
+        {
+            cycle.push_back(config);
+        }
+    }
+
+    if (cycle.empty())
+    {
+        cycle = this->ListPolicyConfigs();
+    }
+    if (cycle.empty())
+    {
+        return "";
+    }
+
+    const auto iter = std::find(cycle.begin(), cycle.end(), this->config_name);
+    if (iter == cycle.end())
+    {
+        return cycle.front();
+    }
+    const auto next_iter = std::next(iter);
+    return *(next_iter == cycle.end() ? cycle.begin() : next_iter);
+}
+
 bool RL::RequestPolicySwitch(const std::string &target_config)
 {
     bool publish_done = false;
     bool publish_value = false;
+    std::string status;
     bool accepted = false;
+    if (!this->IsPolicyConfigAvailable(target_config))
+    {
+        std::cout << LOGGER::WARNING << "Unavailable policy_config switch target: " << target_config << std::endl;
+        return false;
+    }
     {
         std::lock_guard<std::mutex> lock(this->policy_switch_mutex);
         if (target_config.empty())
@@ -199,6 +325,7 @@ bool RL::RequestPolicySwitch(const std::string &target_config)
             this->policy_switch_success = true;
             publish_done = true;
             publish_value = true;
+            status = "ready " + target_config;
             accepted = false;
         }
         else
@@ -209,12 +336,17 @@ bool RL::RequestPolicySwitch(const std::string &target_config)
             this->policy_switch_success = false;
             publish_done = true;
             publish_value = false;
+            status = "switching " + target_config;
             accepted = true;
         }
     }
     if (publish_done)
     {
         this->PublishPolicySwitchDone(publish_value);
+    }
+    if (!status.empty())
+    {
+        this->PublishPolicySwitchStatus(status);
     }
     return accepted;
 }
@@ -223,6 +355,17 @@ bool RL::HasPolicySwitchRequest()
 {
     std::lock_guard<std::mutex> lock(this->policy_switch_mutex);
     return this->policy_switch_requested;
+}
+
+bool RL::PeekPolicySwitchRequest(std::string &target_config)
+{
+    std::lock_guard<std::mutex> lock(this->policy_switch_mutex);
+    if (!this->policy_switch_requested || this->pending_config_name.empty())
+    {
+        return false;
+    }
+    target_config = this->pending_config_name;
+    return true;
 }
 
 bool RL::BeginPolicySwitch(std::string &target_config)
@@ -242,8 +385,10 @@ bool RL::BeginPolicySwitch(std::string &target_config)
 
 void RL::FinishPolicySwitch(bool success)
 {
+    std::string status_config;
     {
         std::lock_guard<std::mutex> lock(this->policy_switch_mutex);
+        status_config = success ? this->config_name : this->pending_config_name;
         this->policy_switch_in_progress = false;
         this->policy_switch_requested = false;
         this->policy_switch_done = success;
@@ -254,6 +399,28 @@ void RL::FinishPolicySwitch(bool success)
         }
     }
     this->PublishPolicySwitchDone(success);
+    this->PublishPolicySwitchStatus(std::string(success ? "done " : "failed ") + status_config);
+}
+
+bool RL::PolicyDefaultDofPosMatchesCurrent(const std::string &target_config, double tolerance)
+{
+    try
+    {
+        const torch::Tensor target_dof_pos = this->ReadPolicyDefaultDofPos(this->robot_name + "/" + target_config);
+        if (!this->params.default_dof_pos.defined() ||
+            target_dof_pos.sizes() != this->params.default_dof_pos.sizes())
+        {
+            return false;
+        }
+
+        const double max_diff = torch::max(torch::abs(target_dof_pos - this->params.default_dof_pos)).item<double>();
+        return max_diff <= tolerance;
+    }
+    catch (const std::exception &e)
+    {
+        std::cout << LOGGER::WARNING << "Failed to compare policy default_dof_pos for '" << target_config << "': " << e.what() << std::endl;
+        return false;
+    }
 }
 
 void RL::ComputeOutput(const torch::Tensor &actions, torch::Tensor &output_dof_pos, torch::Tensor &output_dof_vel, torch::Tensor &output_dof_tau)

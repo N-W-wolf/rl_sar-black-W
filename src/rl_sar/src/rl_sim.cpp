@@ -88,14 +88,9 @@ bool TrySetKeyboardFromDebugInput(Control &control, const std::string &input)
     return false;
 }
 
-bool IsBlackWPolicyConfig(const std::string &input)
+bool IsPolicyToggleCommand(const std::string &input)
 {
-    return input == "himloco" || input == "himloco_down";
-}
-
-std::string ToggleBlackWPolicyConfig(const std::string &current)
-{
-    return current == "himloco_down" ? "himloco" : "himloco_down";
+    return input == "toggle" || input == "toggle_policy" || input == "policy_toggle";
 }
 } // namespace
 
@@ -114,6 +109,8 @@ RL_Sim::RL_Sim()
     this->ang_vel_type = "ang_vel_body";
     this->ros_namespace = this->get_namespace();
     this->config_name = this->declare_parameter<std::string>("policy_config", "");
+    this->policy_config_cycle = this->declare_parameter<std::vector<std::string>>(
+        "policy_config_cycle", std::vector<std::string>{"himloco", "himloco_down"});
     // get params from param_node
     param_client = this->create_client<rcl_interfaces::srv::GetParameters>("/param_node/get_parameters");
     while (!param_client->wait_for_service(std::chrono::seconds(1)))
@@ -237,7 +234,10 @@ RL_Sim::RL_Sim()
         this->ros_namespace + "robot_joint_controller/command", rclcpp::SystemDefaultsQoS());
     this->policy_switch_done_publisher = this->create_publisher<std_msgs::msg::Bool>(
         "/rl_sim/policy_switch_done", rclcpp::QoS(1).transient_local().reliable());
+    this->policy_switch_status_publisher = this->create_publisher<std_msgs::msg::String>(
+        "/rl_sim/policy_switch_status", rclcpp::QoS(1).transient_local().reliable());
     this->PublishPolicySwitchDone(true);
+    this->PublishPolicySwitchStatus("ready " + this->config_name);
 
     // subscriber
     this->cmd_vel_subscriber = this->create_subscription<geometry_msgs::msg::Twist>(
@@ -308,6 +308,7 @@ RL_Sim::RL_Sim()
               << "(example: ros2 topic pub --once /rl_sim/policy_config std_msgs/msg/String \"{data: 'himloco_down'}\")"
               << std::endl;
     std::cout << LOGGER::INFO << "Policy switch done topic: /rl_sim/policy_switch_done" << std::endl;
+    std::cout << LOGGER::INFO << "Policy switch status topic: /rl_sim/policy_switch_status" << std::endl;
 }
 
 RL_Sim::~RL_Sim()
@@ -478,6 +479,19 @@ void RL_Sim::PublishPolicySwitchDone(bool done)
 #endif
 }
 
+void RL_Sim::PublishPolicySwitchStatus(const std::string &status)
+{
+#if defined(USE_ROS2)
+    if (!this->policy_switch_status_publisher)
+    {
+        return;
+    }
+    std_msgs::msg::String msg;
+    msg.data = status;
+    this->policy_switch_status_publisher->publish(msg);
+#endif
+}
+
 void RL_Sim::RobotControl()
 {
     if (this->control.current_keyboard == Input::Keyboard::R || this->control.current_gamepad == Input::Gamepad::RB_Y)
@@ -600,9 +614,14 @@ void RL_Sim::DebugKeyCallback(const std_msgs::msg::String::SharedPtr msg)
         return;
     }
 
-    if (input == "toggle_policy" || input == "policy_toggle")
+    if (IsPolicyToggleCommand(input))
     {
-        const std::string target_config = ToggleBlackWPolicyConfig(this->config_name);
+        const std::string target_config = this->GetNextPolicyConfig();
+        if (target_config.empty())
+        {
+            std::cout << LOGGER::WARNING << "No available policy_config for switch cycle." << std::endl;
+            return;
+        }
         if (this->RequestPolicySwitch(target_config))
         {
             std::cout << LOGGER::INFO << "Policy switch requested by debug topic: " << target_config << std::endl;
@@ -610,7 +629,7 @@ void RL_Sim::DebugKeyCallback(const std_msgs::msg::String::SharedPtr msg)
         return;
     }
 
-    if (IsBlackWPolicyConfig(input))
+    if (this->IsPolicyConfigAvailable(input))
     {
         if (this->RequestPolicySwitch(input))
         {
@@ -636,8 +655,13 @@ void RL_Sim::PolicyConfigCallback(const std_msgs::msg::String::SharedPtr msg)
         return;
     }
 
-    const std::string target_config = input == "toggle" ? ToggleBlackWPolicyConfig(this->config_name) : input;
-    if (!IsBlackWPolicyConfig(target_config))
+    const std::string target_config = IsPolicyToggleCommand(input) ? this->GetNextPolicyConfig() : input;
+    if (target_config.empty())
+    {
+        std::cout << LOGGER::WARNING << "No available policy_config for switch cycle." << std::endl;
+        return;
+    }
+    if (!this->IsPolicyConfigAvailable(target_config))
     {
         std::cout << LOGGER::WARNING << "Unsupported policy_config switch target: " << msg->data << std::endl;
         return;

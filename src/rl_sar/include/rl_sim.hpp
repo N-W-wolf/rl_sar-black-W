@@ -66,6 +66,7 @@ private:
     void GetState(RobotState<double> *state) override;
     void SetCommand(const RobotCommand<double> *command) override;
     void PublishPolicySwitchDone(bool done) override;
+    void PublishPolicySwitchStatus(const std::string &status) override;
     void RunModel();
     void RobotControl();
 
@@ -118,6 +119,7 @@ private:
     rclcpp::Client<std_srvs::srv::Empty>::SharedPtr gazebo_reset_world_client;
     rclcpp::Publisher<robot_msgs::msg::RobotCommand>::SharedPtr robot_command_publisher;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr policy_switch_done_publisher;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr policy_switch_status_publisher;
     rclcpp::Subscription<robot_msgs::msg::RobotState>::SharedPtr robot_state_subscriber;
     rclcpp::Client<rcl_interfaces::srv::GetParameters>::SharedPtr param_client;
     void GazeboImuCallback(const sensor_msgs::msg::Imu::SharedPtr msg);
