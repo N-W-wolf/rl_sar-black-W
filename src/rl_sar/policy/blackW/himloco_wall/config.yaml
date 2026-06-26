@@ -1,8 +1,8 @@
 # Copyright (c) 2024-2025 Ziqi Fan
 # SPDX-License-Identifier: Apache-2.0
 
-blackW/himloco:
-  model_name: "policy_0626_7_Jun26_20-12-37_.pt"
+blackW/himloco_wall:
+  model_name: "policy_0626_5_Jun26_12-23-31_.pt"
   num_observations: 57
   observations: ["commands","ang_vel", "gravity_vec", "dof_pos", "dof_vel", "actions"]
   observations_history: [0,1,2,3,4,5]  # 0 is the latest observation

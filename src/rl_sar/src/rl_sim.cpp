@@ -708,43 +708,98 @@ void RL_Sim::JoyCallback(
     // |__ buttons[]: A=0, B=1, X=2, Y=3, LB=4, RB=5, back=6, start=7, power=8, stickL=9, stickR=10
     // |__ axes[]: Lx=0, Ly=1, Rx=3, Ry=4, LT=2, RT=5, DPadX=6, DPadY=7
 
-    if (this->joy_msg.buttons[0]) this->control.SetGamepad(Input::Gamepad::A);
-    if (this->joy_msg.buttons[1]) this->control.SetGamepad(Input::Gamepad::B);
-    if (this->joy_msg.buttons[2]) this->control.SetGamepad(Input::Gamepad::X);
-    if (this->joy_msg.buttons[3]) this->control.SetGamepad(Input::Gamepad::Y);
-    if (this->joy_msg.buttons[4]) this->control.SetGamepad(Input::Gamepad::LB);
-    if (this->joy_msg.buttons[5]) this->control.SetGamepad(Input::Gamepad::RB);
-    if (this->joy_msg.buttons[9]) this->control.SetGamepad(Input::Gamepad::LStick);
-    if (this->joy_msg.buttons[10]) this->control.SetGamepad(Input::Gamepad::RStick);
-    if (this->joy_msg.axes[7] > 0) this->control.SetGamepad(Input::Gamepad::DPadUp);
-    if (this->joy_msg.axes[7] < 0) this->control.SetGamepad(Input::Gamepad::DPadDown);
-    if (this->joy_msg.axes[6] < 0) this->control.SetGamepad(Input::Gamepad::DPadLeft);
-    if (this->joy_msg.axes[6] > 0) this->control.SetGamepad(Input::Gamepad::DPadRight);
-    if (this->joy_msg.buttons[4] && this->joy_msg.buttons[0]) this->control.SetGamepad(Input::Gamepad::LB_A);
-    if (this->joy_msg.buttons[4] && this->joy_msg.buttons[1]) this->control.SetGamepad(Input::Gamepad::LB_B);
-    if (this->joy_msg.buttons[4] && this->joy_msg.buttons[2]) this->control.SetGamepad(Input::Gamepad::LB_X);
-    if (this->joy_msg.buttons[4] && this->joy_msg.buttons[3]) this->control.SetGamepad(Input::Gamepad::LB_Y);
-    if (this->joy_msg.buttons[4] && this->joy_msg.buttons[9]) this->control.SetGamepad(Input::Gamepad::LB_LStick);
-    if (this->joy_msg.buttons[4] && this->joy_msg.buttons[10]) this->control.SetGamepad(Input::Gamepad::LB_RStick);
-    if (this->joy_msg.buttons[4] && this->joy_msg.axes[7] > 0) this->control.SetGamepad(Input::Gamepad::LB_DPadUp);
-    if (this->joy_msg.buttons[4] && this->joy_msg.axes[7] < 0) this->control.SetGamepad(Input::Gamepad::LB_DPadDown);
-    if (this->joy_msg.buttons[4] && this->joy_msg.axes[6] > 0) this->control.SetGamepad(Input::Gamepad::LB_DPadRight);
-    if (this->joy_msg.buttons[4] && this->joy_msg.axes[6] < 0) this->control.SetGamepad(Input::Gamepad::LB_DPadLeft);
-    if (this->joy_msg.buttons[5] && this->joy_msg.buttons[0]) this->control.SetGamepad(Input::Gamepad::RB_A);
-    if (this->joy_msg.buttons[5] && this->joy_msg.buttons[1]) this->control.SetGamepad(Input::Gamepad::RB_B);
-    if (this->joy_msg.buttons[5] && this->joy_msg.buttons[2]) this->control.SetGamepad(Input::Gamepad::RB_X);
-    if (this->joy_msg.buttons[5] && this->joy_msg.buttons[3]) this->control.SetGamepad(Input::Gamepad::RB_Y);
-    if (this->joy_msg.buttons[5] && this->joy_msg.buttons[9]) this->control.SetGamepad(Input::Gamepad::RB_LStick);
-    if (this->joy_msg.buttons[5] && this->joy_msg.buttons[10]) this->control.SetGamepad(Input::Gamepad::RB_RStick);
-    if (this->joy_msg.buttons[5] && this->joy_msg.axes[7] > 0) this->control.SetGamepad(Input::Gamepad::RB_DPadUp);
-    if (this->joy_msg.buttons[5] && this->joy_msg.axes[7] < 0) this->control.SetGamepad(Input::Gamepad::RB_DPadDown);
-    if (this->joy_msg.buttons[5] && this->joy_msg.axes[6] > 0) this->control.SetGamepad(Input::Gamepad::RB_DPadRight);
-    if (this->joy_msg.buttons[5] && this->joy_msg.axes[6] < 0) this->control.SetGamepad(Input::Gamepad::RB_DPadLeft);
-    if (this->joy_msg.buttons[4] && this->joy_msg.buttons[5]) this->control.SetGamepad(Input::Gamepad::LB_RB);
+    const auto button = [this](size_t index) -> bool
+    {
+        return index < this->joy_msg.buttons.size() && this->joy_msg.buttons[index] != 0;
+    };
+    const auto previous_button = [this](size_t index) -> bool
+    {
+        return this->has_previous_joy_msg
+            && index < this->previous_joy_msg.buttons.size()
+            && this->previous_joy_msg.buttons[index] != 0;
+    };
+    const auto axis = [this](size_t index) -> double
+    {
+        return index < this->joy_msg.axes.size() ? this->joy_msg.axes[index] : 0.0;
+    };
+    const auto previous_axis = [this](size_t index) -> double
+    {
+        return this->has_previous_joy_msg && index < this->previous_joy_msg.axes.size()
+            ? this->previous_joy_msg.axes[index]
+            : 0.0;
+    };
+    const auto axis_positive = [&axis](size_t index) -> bool { return axis(index) > 0.5; };
+    const auto axis_negative = [&axis](size_t index) -> bool { return axis(index) < -0.5; };
+    const auto previous_axis_positive = [&previous_axis](size_t index) -> bool { return previous_axis(index) > 0.5; };
+    const auto previous_axis_negative = [&previous_axis](size_t index) -> bool { return previous_axis(index) < -0.5; };
+    const auto rising = [](bool current, bool previous) -> bool { return current && !previous; };
 
-    this->control.x = ApplyDeadband(this->joy_msg.axes[1] * 2, kLinearCommandDeadband); // LY
-    this->control.y = ApplyDeadband(this->joy_msg.axes[0] * 1, kLinearCommandDeadband); // LX
-    this->control.yaw = ApplyDeadband(this->joy_msg.axes[3] * 3.0, kYawCommandDeadband); // RX
+    const bool a = button(0);
+    const bool b = button(1);
+    const bool x = button(2);
+    const bool y = button(3);
+    const bool lb = button(4);
+    const bool rb = button(5);
+    const bool l_stick = button(9);
+    const bool r_stick = button(10);
+    const bool dpad_up = axis_positive(7);
+    const bool dpad_down = axis_negative(7);
+    const bool dpad_left = axis_negative(6);
+    const bool dpad_right = axis_positive(6);
+
+    const bool previous_a = previous_button(0);
+    const bool previous_b = previous_button(1);
+    const bool previous_x = previous_button(2);
+    const bool previous_y = previous_button(3);
+    const bool previous_lb = previous_button(4);
+    const bool previous_rb = previous_button(5);
+    const bool previous_l_stick = previous_button(9);
+    const bool previous_r_stick = previous_button(10);
+    const bool previous_dpad_up = previous_axis_positive(7);
+    const bool previous_dpad_down = previous_axis_negative(7);
+    const bool previous_dpad_left = previous_axis_negative(6);
+    const bool previous_dpad_right = previous_axis_positive(6);
+
+    if (rising(a, previous_a)) this->control.SetGamepad(Input::Gamepad::A);
+    if (rising(b, previous_b)) this->control.SetGamepad(Input::Gamepad::B);
+    if (rising(x, previous_x)) this->control.SetGamepad(Input::Gamepad::X);
+    if (rising(y, previous_y)) this->control.SetGamepad(Input::Gamepad::Y);
+    if (rising(lb, previous_lb)) this->control.SetGamepad(Input::Gamepad::LB);
+    if (rising(rb, previous_rb)) this->control.SetGamepad(Input::Gamepad::RB);
+    if (rising(l_stick, previous_l_stick)) this->control.SetGamepad(Input::Gamepad::LStick);
+    if (rising(r_stick, previous_r_stick)) this->control.SetGamepad(Input::Gamepad::RStick);
+    if (rising(dpad_up, previous_dpad_up)) this->control.SetGamepad(Input::Gamepad::DPadUp);
+    if (rising(dpad_down, previous_dpad_down)) this->control.SetGamepad(Input::Gamepad::DPadDown);
+    if (rising(dpad_left, previous_dpad_left)) this->control.SetGamepad(Input::Gamepad::DPadLeft);
+    if (rising(dpad_right, previous_dpad_right)) this->control.SetGamepad(Input::Gamepad::DPadRight);
+    if (rising(lb && a, previous_lb && previous_a)) this->control.SetGamepad(Input::Gamepad::LB_A);
+    if (rising(lb && b, previous_lb && previous_b)) this->control.SetGamepad(Input::Gamepad::LB_B);
+    if (rising(lb && x, previous_lb && previous_x)) this->control.SetGamepad(Input::Gamepad::LB_X);
+    if (rising(lb && y, previous_lb && previous_y)) this->control.SetGamepad(Input::Gamepad::LB_Y);
+    if (rising(lb && l_stick, previous_lb && previous_l_stick)) this->control.SetGamepad(Input::Gamepad::LB_LStick);
+    if (rising(lb && r_stick, previous_lb && previous_r_stick)) this->control.SetGamepad(Input::Gamepad::LB_RStick);
+    if (rising(lb && dpad_up, previous_lb && previous_dpad_up)) this->control.SetGamepad(Input::Gamepad::LB_DPadUp);
+    if (rising(lb && dpad_down, previous_lb && previous_dpad_down)) this->control.SetGamepad(Input::Gamepad::LB_DPadDown);
+    if (rising(lb && dpad_right, previous_lb && previous_dpad_right)) this->control.SetGamepad(Input::Gamepad::LB_DPadRight);
+    if (rising(lb && dpad_left, previous_lb && previous_dpad_left)) this->control.SetGamepad(Input::Gamepad::LB_DPadLeft);
+    if (rising(rb && a, previous_rb && previous_a)) this->control.SetGamepad(Input::Gamepad::RB_A);
+    if (rising(rb && b, previous_rb && previous_b)) this->control.SetGamepad(Input::Gamepad::RB_B);
+    if (rising(rb && x, previous_rb && previous_x)) this->control.SetGamepad(Input::Gamepad::RB_X);
+    if (rising(rb && y, previous_rb && previous_y)) this->control.SetGamepad(Input::Gamepad::RB_Y);
+    if (rising(rb && l_stick, previous_rb && previous_l_stick)) this->control.SetGamepad(Input::Gamepad::RB_LStick);
+    if (rising(rb && r_stick, previous_rb && previous_r_stick)) this->control.SetGamepad(Input::Gamepad::RB_RStick);
+    if (rising(rb && dpad_up, previous_rb && previous_dpad_up)) this->control.SetGamepad(Input::Gamepad::RB_DPadUp);
+    if (rising(rb && dpad_down, previous_rb && previous_dpad_down)) this->control.SetGamepad(Input::Gamepad::RB_DPadDown);
+    if (rising(rb && dpad_right, previous_rb && previous_dpad_right)) this->control.SetGamepad(Input::Gamepad::RB_DPadRight);
+    if (rising(rb && dpad_left, previous_rb && previous_dpad_left)) this->control.SetGamepad(Input::Gamepad::RB_DPadLeft);
+    if (rising(lb && rb, previous_lb && previous_rb)) this->control.SetGamepad(Input::Gamepad::LB_RB);
+
+    this->control.x = ApplyDeadband(axis(1) * 2, kLinearCommandDeadband); // LY
+    this->control.y = ApplyDeadband(axis(0) * 1, kLinearCommandDeadband); // LX
+    this->control.yaw = ApplyDeadband(axis(3) * 3.0, kYawCommandDeadband); // RX
+
+    this->previous_joy_msg = this->joy_msg;
+    this->has_previous_joy_msg = true;
 }
 
 #if defined(USE_ROS1)

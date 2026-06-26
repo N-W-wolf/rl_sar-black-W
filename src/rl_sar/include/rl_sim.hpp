@@ -89,6 +89,7 @@ private:
     geometry_msgs::Pose pose;
     geometry_msgs::Twist cmd_vel;
     sensor_msgs::Joy joy_msg;
+    sensor_msgs::Joy previous_joy_msg;
     ros::Subscriber model_state_subscriber;
     ros::Subscriber cmd_vel_subscriber;
     ros::Subscriber joy_subscriber;
@@ -106,6 +107,7 @@ private:
     sensor_msgs::msg::Imu gazebo_imu;
     geometry_msgs::msg::Twist cmd_vel;
     sensor_msgs::msg::Joy joy_msg;
+    sensor_msgs::msg::Joy previous_joy_msg;
     robot_msgs::msg::RobotCommand robot_command_publisher_msg;
     robot_msgs::msg::RobotState robot_state_subscriber_msg;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr gazebo_imu_subscriber;
@@ -131,6 +133,7 @@ private:
 #endif
 
     // others
+    bool has_previous_joy_msg = false;
     std::string gazebo_model_name;
     int motiontime = 0;
     std::map<std::string, double> joint_positions;

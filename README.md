@@ -244,7 +244,7 @@ ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: 'shutdown'}"
 | `Y` | `black`/`blackW` 下按 `policy_config_cycle` 切换模型 |
 | `LY/LX/RX` | 前后、左右、偏航速度 |
 
-手柄轴输入带死区过滤：`x/y/yaw` 绝对值小于 `0.2` 时会置为 `0`，用于避免摇杆中位附近的小幅抖动。键盘输入和 `/cmd_vel` 不做这个死区过滤。
+手柄按钮和 DPad 按上升沿触发：按住不放不会重复执行切换、复位、导航模式开关等离散动作；摇杆轴仍按连续量实时更新。手柄轴输入带死区过滤：`x/y/yaw` 绝对值小于 `0.2` 时会置为 `0`，用于避免摇杆中位附近的小幅抖动。键盘输入和 `/cmd_vel` 不做这个死区过滤。
 
 ## 运行时模型切换
 

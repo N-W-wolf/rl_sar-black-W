@@ -4,10 +4,10 @@
 blackW:
   # Number of control cycles used for posture transition when switching
   # between policies with different default_dof_pos.
-  posture_transition_cycles: 400
+  posture_transition_cycles: 200
 
   # This list defines both the allowed runtime switch targets and the
   # T/Y/toggle cycle order.
   policy_config_cycle:
     - himloco
-    - himloco_down
+    - himloco_wall
