@@ -4,11 +4,11 @@
 blackW:
   # Number of control cycles used to move from the current pose to the
   # bridge-drive pose. The control loop period is 5 ms in rl_sim.
-  prepare_cycles: 100
+  prepare_cycles: 150
 
   # Number of control cycles used to move from bridge-drive pose to the
   # selected RL policy default_dof_pos before entering RL locomotion.
-  exit_to_rl_cycles: 100
+  exit_to_rl_cycles: 150
 
   # Bridge drive intentionally runs slowly. x supports forward and reverse;
   # y command is ignored in this mode.
