@@ -665,6 +665,7 @@ void RL::ReadYamlBase(std::string robot_path)
 void RL::ReadPolicySwitchConfig(std::string robot_path)
 {
     this->policy_config_cycle.clear();
+    this->policy_transition_cycles = 400;
 
     const std::string config_path = std::string(CMAKE_CURRENT_SOURCE_DIR) + "/policy/" + robot_path + "/policy_switch.yaml";
     if (!PathIsRegularFile(config_path))
@@ -677,6 +678,11 @@ void RL::ReadPolicySwitchConfig(std::string robot_path)
 
     YAML::Node root = YAML::LoadFile(config_path);
     YAML::Node config = root[robot_path] ? root[robot_path] : root;
+    if (config["posture_transition_cycles"])
+    {
+        this->policy_transition_cycles = std::max(1, config["posture_transition_cycles"].as<int>());
+    }
+
     YAML::Node cycle = config["policy_config_cycle"];
     if (!cycle || !cycle.IsSequence())
     {

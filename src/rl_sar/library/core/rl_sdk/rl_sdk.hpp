@@ -247,6 +247,7 @@ public:
     std::mutex policy_switch_mutex;
     std::string pending_config_name;
     std::vector<std::string> policy_config_cycle;
+    int policy_transition_cycles = 400;
     bool policy_switch_requested = false;
     bool policy_switch_in_progress = false;
     bool policy_switch_done = true;

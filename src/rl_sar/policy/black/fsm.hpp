@@ -408,7 +408,7 @@ public:
             return;
         }
 
-        transition_percent += 1.0f / 400.0f;
+        transition_percent += 1.0f / static_cast<float>(std::max(1, rl.policy_transition_cycles));
         transition_percent = std::min(transition_percent, 1.0f);
 
         for (int i = 0; i < rl.params.num_of_dofs; ++i)

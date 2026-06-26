@@ -9,12 +9,146 @@
 #include "fsm_core.hpp"
 #include "rl_sdk.hpp"
 #include <cmath>
+#include <iterator>
 #include <stdexcept>
 
 namespace blackw_fsm
 {
 
 constexpr double kPolicyDefaultDofPosTolerance = 1e-3;
+
+struct BridgeDriveConfig
+{
+    int prepare_cycles = 400;
+    int exit_to_rl_cycles = 400;
+    double max_x = 0.25;
+    double max_yaw = 0.25;
+    double wheel_velocity_scale = 6.0;
+    double yaw_to_wheel_velocity = 2.0;
+    std::vector<double> dof_pos;
+    std::vector<double> kp;
+    std::vector<double> kd;
+    std::vector<double> wheel_velocity_sign;
+};
+
+inline std::vector<double> ReadBridgeVector(const YAML::Node &node)
+{
+    std::vector<double> values;
+    if (!node || !node.IsSequence())
+    {
+        return values;
+    }
+    for (const YAML::Node &value : node)
+    {
+        values.push_back(value.as<double>());
+    }
+    return values;
+}
+
+inline bool IsWheelIndex(const RL &rl, int index)
+{
+    return std::find(rl.params.wheel_indices.begin(), rl.params.wheel_indices.end(), index) != rl.params.wheel_indices.end();
+}
+
+inline BridgeDriveConfig ReadBridgeDriveConfig(const RL &rl)
+{
+    BridgeDriveConfig config;
+    config.prepare_cycles = 400;
+    config.exit_to_rl_cycles = 400;
+    config.max_x = 0.25;
+    config.max_yaw = 0.25;
+    config.wheel_velocity_scale = 6.0;
+    config.yaw_to_wheel_velocity = 2.0;
+    config.dof_pos.resize(rl.params.num_of_dofs);
+    config.kp.resize(rl.params.num_of_dofs);
+    config.kd.resize(rl.params.num_of_dofs);
+    config.wheel_velocity_sign = std::vector<double>(rl.params.wheel_indices.size(), 1.0);
+
+    for (int i = 0; i < rl.params.num_of_dofs; ++i)
+    {
+        config.dof_pos[i] = rl.params.default_dof_pos[0][i].item<double>();
+        config.kp[i] = rl.params.fixed_kp[0][i].item<double>();
+        config.kd[i] = rl.params.fixed_kd[0][i].item<double>();
+    }
+
+    const std::string config_path = std::string(CMAKE_CURRENT_SOURCE_DIR) + "/policy/" + rl.robot_name + "/bridge_drive.yaml";
+    try
+    {
+        YAML::Node root = YAML::LoadFile(config_path);
+        YAML::Node node = root[rl.robot_name] ? root[rl.robot_name] : root;
+        if (node["prepare_cycles"]) config.prepare_cycles = std::max(1, node["prepare_cycles"].as<int>());
+        if (node["exit_to_rl_cycles"]) config.exit_to_rl_cycles = std::max(1, node["exit_to_rl_cycles"].as<int>());
+        if (node["max_x"]) config.max_x = std::max(0.0, node["max_x"].as<double>());
+        if (node["max_yaw"]) config.max_yaw = std::max(0.0, node["max_yaw"].as<double>());
+        if (node["wheel_velocity_scale"]) config.wheel_velocity_scale = node["wheel_velocity_scale"].as<double>();
+        if (node["yaw_to_wheel_velocity"]) config.yaw_to_wheel_velocity = node["yaw_to_wheel_velocity"].as<double>();
+
+        std::vector<double> dof_pos = ReadBridgeVector(node["bridge_default_dof_pos"]);
+        std::vector<double> kp = ReadBridgeVector(node["kp"]);
+        std::vector<double> kd = ReadBridgeVector(node["kd"]);
+        std::vector<double> wheel_velocity_sign = ReadBridgeVector(node["wheel_velocity_sign"]);
+        if (static_cast<int>(dof_pos.size()) == rl.params.num_of_dofs) config.dof_pos = dof_pos;
+        if (static_cast<int>(kp.size()) == rl.params.num_of_dofs) config.kp = kp;
+        if (static_cast<int>(kd.size()) == rl.params.num_of_dofs) config.kd = kd;
+        if (wheel_velocity_sign.size() == rl.params.wheel_indices.size()) config.wheel_velocity_sign = wheel_velocity_sign;
+    }
+    catch (const std::exception &e)
+    {
+        std::cout << LOGGER::WARNING << "Failed to read bridge_drive.yaml, using default bridge drive config: " << e.what() << std::endl;
+    }
+
+    return config;
+}
+
+inline BridgeDriveConfig ReadLowBarDriveConfig(const RL &rl)
+{
+    BridgeDriveConfig config;
+    config.prepare_cycles = 400;
+    config.exit_to_rl_cycles = 400;
+    config.max_x = 0.25;
+    config.max_yaw = 0.25;
+    config.wheel_velocity_scale = 6.0;
+    config.yaw_to_wheel_velocity = 2.0;
+    config.dof_pos.resize(rl.params.num_of_dofs);
+    config.kp.resize(rl.params.num_of_dofs);
+    config.kd.resize(rl.params.num_of_dofs);
+    config.wheel_velocity_sign = std::vector<double>(rl.params.wheel_indices.size(), 1.0);
+
+    for (int i = 0; i < rl.params.num_of_dofs; ++i)
+    {
+        config.dof_pos[i] = rl.params.default_dof_pos[0][i].item<double>();
+        config.kp[i] = rl.params.fixed_kp[0][i].item<double>();
+        config.kd[i] = rl.params.fixed_kd[0][i].item<double>();
+    }
+
+    const std::string config_path = std::string(CMAKE_CURRENT_SOURCE_DIR) + "/policy/" + rl.robot_name + "/low_bar_drive.yaml";
+    try
+    {
+        YAML::Node root = YAML::LoadFile(config_path);
+        YAML::Node node = root[rl.robot_name] ? root[rl.robot_name] : root;
+        if (node["prepare_cycles"]) config.prepare_cycles = std::max(1, node["prepare_cycles"].as<int>());
+        if (node["exit_to_rl_cycles"]) config.exit_to_rl_cycles = std::max(1, node["exit_to_rl_cycles"].as<int>());
+        if (node["max_x"]) config.max_x = std::max(0.0, node["max_x"].as<double>());
+        if (node["max_yaw"]) config.max_yaw = std::max(0.0, node["max_yaw"].as<double>());
+        if (node["wheel_velocity_scale"]) config.wheel_velocity_scale = node["wheel_velocity_scale"].as<double>();
+        if (node["yaw_to_wheel_velocity"]) config.yaw_to_wheel_velocity = node["yaw_to_wheel_velocity"].as<double>();
+
+        std::vector<double> dof_pos = ReadBridgeVector(node["low_bar_default_dof_pos"]);
+        std::vector<double> kp = ReadBridgeVector(node["kp"]);
+        std::vector<double> kd = ReadBridgeVector(node["kd"]);
+        std::vector<double> wheel_velocity_sign = ReadBridgeVector(node["wheel_velocity_sign"]);
+        if (static_cast<int>(dof_pos.size()) == rl.params.num_of_dofs) config.dof_pos = dof_pos;
+        if (static_cast<int>(kp.size()) == rl.params.num_of_dofs) config.kp = kp;
+        if (static_cast<int>(kd.size()) == rl.params.num_of_dofs) config.kd = kd;
+        if (wheel_velocity_sign.size() == rl.params.wheel_indices.size()) config.wheel_velocity_sign = wheel_velocity_sign;
+    }
+    catch (const std::exception &e)
+    {
+        std::cout << LOGGER::WARNING << "Failed to read low_bar_drive.yaml, using default low-bar drive config: " << e.what() << std::endl;
+    }
+
+    return config;
+}
 
 inline bool RequestNextPolicySwitch(RL &rl)
 {
@@ -175,6 +309,18 @@ public:
             else if (rl.control.current_keyboard == Input::Keyboard::Num1 || rl.control.current_gamepad == Input::Gamepad::RB_DPadUp)
             {
                 return "RLFSMStateRL_Locomotion";
+            }
+            else if (rl.control.current_keyboard == Input::Keyboard::Num2 || rl.control.current_gamepad == Input::Gamepad::RB_DPadRight)
+            {
+                rl.control.current_keyboard = rl.control.last_keyboard;
+                rl.control.current_gamepad = Input::Gamepad::None;
+                return "RLFSMStateBridgeDrive";
+            }
+            else if (rl.control.current_keyboard == Input::Keyboard::Num3 || rl.control.current_gamepad == Input::Gamepad::RB_DPadDown)
+            {
+                rl.control.current_keyboard = rl.control.last_keyboard;
+                rl.control.current_gamepad = Input::Gamepad::None;
+                return "RLFSMStateLowBarDrive";
             }
             else if (rl.control.current_keyboard == Input::Keyboard::Num9 || rl.control.current_gamepad == Input::Gamepad::B)
             {
@@ -341,6 +487,18 @@ public:
         {
             return "RLFSMStateRL_Locomotion";
         }
+        else if (rl.control.current_keyboard == Input::Keyboard::Num2 || rl.control.current_gamepad == Input::Gamepad::RB_DPadRight)
+        {
+            rl.control.current_keyboard = rl.control.last_keyboard;
+            rl.control.current_gamepad = Input::Gamepad::None;
+            return "RLFSMStateBridgeDrive";
+        }
+        else if (rl.control.current_keyboard == Input::Keyboard::Num3 || rl.control.current_gamepad == Input::Gamepad::RB_DPadDown)
+        {
+            rl.control.current_keyboard = rl.control.last_keyboard;
+            rl.control.current_gamepad = Input::Gamepad::None;
+            return "RLFSMStateLowBarDrive";
+        }
         return state_name_;
     }
 };
@@ -405,7 +563,7 @@ public:
             return;
         }
 
-        transition_percent += 1.0f / 400.0f;
+        transition_percent += 1.0f / static_cast<float>(std::max(1, rl.policy_transition_cycles));
         transition_percent = std::min(transition_percent, 1.0f);
 
         for (int i = 0; i < rl.params.num_of_dofs; ++i)
@@ -476,6 +634,476 @@ public:
     }
 };
 
+class RLFSMStateBridgeDrive : public RLFSMState
+{
+public:
+    RLFSMStateBridgeDrive(RL *rl) : RLFSMState(*rl, "RLFSMStateBridgeDrive") {}
+
+    BridgeDriveConfig bridge_config;
+    float prepare_percent = 0.0f;
+    bool drive_ready = false;
+    std::vector<double> start_pos;
+
+    void Enter() override
+    {
+        bridge_config = ReadBridgeDriveConfig(rl);
+        prepare_percent = 0.0f;
+        drive_ready = false;
+        rl.rl_init_done = false;
+        rl.ClearOutputQueues();
+        rl.now_state = *fsm_state;
+
+        start_pos.resize(rl.params.num_of_dofs);
+        for (int i = 0; i < rl.params.num_of_dofs; ++i)
+        {
+            start_pos[i] = rl.now_state.motor_state.q[i];
+        }
+
+        std::cout << LOGGER::INFO << "Entered bridge drive mode. Press '1' or RB+DPadUp to return to RL locomotion." << std::endl;
+    }
+
+    void Run() override
+    {
+        rl.now_state = *fsm_state;
+        if (!drive_ready)
+        {
+            prepare_percent += 1.0f / static_cast<float>(bridge_config.prepare_cycles);
+            prepare_percent = std::min(prepare_percent, 1.0f);
+            if (prepare_percent == 1.0f)
+            {
+                drive_ready = true;
+                std::cout << std::endl << LOGGER::INFO << "Bridge drive pose ready." << std::endl;
+            }
+        }
+
+        const double x = clamp(rl.control.x, -bridge_config.max_x, bridge_config.max_x);
+        const double yaw = clamp(rl.control.yaw, -bridge_config.max_yaw, bridge_config.max_yaw);
+        const double left_velocity = bridge_config.wheel_velocity_scale * x - bridge_config.yaw_to_wheel_velocity * yaw;
+        const double right_velocity = bridge_config.wheel_velocity_scale * x + bridge_config.yaw_to_wheel_velocity * yaw;
+
+        for (int i = 0; i < rl.params.num_of_dofs; ++i)
+        {
+            const bool is_wheel = IsWheelIndex(rl, i);
+            if (is_wheel)
+            {
+                const auto wheel_iter = std::find(rl.params.wheel_indices.begin(), rl.params.wheel_indices.end(), i);
+                const int wheel_id = static_cast<int>(std::distance(rl.params.wheel_indices.begin(), wheel_iter));
+                const bool is_left_wheel = i == 3 || i == 11;
+                const double wheel_velocity = is_left_wheel ? left_velocity : right_velocity;
+                fsm_command->motor_command.q[i] = rl.now_state.motor_state.q[i];
+                fsm_command->motor_command.dq[i] = bridge_config.wheel_velocity_sign[wheel_id] * wheel_velocity;
+                fsm_command->motor_command.kp[i] = 0.0;
+                fsm_command->motor_command.kd[i] = bridge_config.kd[i];
+                fsm_command->motor_command.tau[i] = 0.0;
+            }
+            else
+            {
+                const double target_pos = bridge_config.dof_pos[i];
+                fsm_command->motor_command.q[i] = (1 - prepare_percent) * start_pos[i] + prepare_percent * target_pos;
+                fsm_command->motor_command.dq[i] = 0.0;
+                fsm_command->motor_command.kp[i] = bridge_config.kp[i];
+                fsm_command->motor_command.kd[i] = bridge_config.kd[i];
+                fsm_command->motor_command.tau[i] = 0.0;
+            }
+        }
+
+        std::cout << "\r\033[K" << std::flush << LOGGER::INFO
+                  << "Bridge drive " << (drive_ready ? "ready" : "prepare")
+                  << " x:" << x << " yaw:" << yaw << std::flush;
+    }
+
+    void Exit() override
+    {}
+
+    std::string CheckChange() override
+    {
+        if (rl.control.current_keyboard == Input::Keyboard::P || rl.control.current_gamepad == Input::Gamepad::LB_X)
+        {
+            rl.control.x = 0.0;
+            rl.control.y = 0.0;
+            rl.control.yaw = 0.0;
+            return "RLFSMStatePassive";
+        }
+        else if (rl.control.current_keyboard == Input::Keyboard::Num9 || rl.control.current_gamepad == Input::Gamepad::B)
+        {
+            rl.control.x = 0.0;
+            rl.control.y = 0.0;
+            rl.control.yaw = 0.0;
+            return "RLFSMStateGetDown";
+        }
+        else if (rl.control.current_keyboard == Input::Keyboard::Num0 || rl.control.current_gamepad == Input::Gamepad::A)
+        {
+            rl.control.x = 0.0;
+            rl.control.y = 0.0;
+            rl.control.yaw = 0.0;
+            return "RLFSMStateGetUp";
+        }
+        else if (rl.control.current_keyboard == Input::Keyboard::Num1 || rl.control.current_gamepad == Input::Gamepad::RB_DPadUp)
+        {
+            rl.control.x = 0.0;
+            rl.control.y = 0.0;
+            rl.control.yaw = 0.0;
+            rl.control.current_keyboard = rl.control.last_keyboard;
+            rl.control.current_gamepad = Input::Gamepad::None;
+            return "RLFSMStateBridgeToRLTransition";
+        }
+        else if (rl.control.current_keyboard == Input::Keyboard::Num3 || rl.control.current_gamepad == Input::Gamepad::RB_DPadDown)
+        {
+            rl.control.current_keyboard = rl.control.last_keyboard;
+            rl.control.current_gamepad = Input::Gamepad::None;
+            return "RLFSMStateLowBarDrive";
+        }
+        return state_name_;
+    }
+};
+
+class RLFSMStateBridgeToRLTransition : public RLFSMState
+{
+public:
+    RLFSMStateBridgeToRLTransition(RL *rl) : RLFSMState(*rl, "RLFSMStateBridgeToRLTransition") {}
+
+    BridgeDriveConfig bridge_config;
+    float transition_percent = 0.0f;
+    bool transition_failed = false;
+    std::vector<double> start_pos;
+    torch::Tensor target_dof_pos;
+
+    void Enter() override
+    {
+        bridge_config = ReadBridgeDriveConfig(rl);
+        transition_percent = 0.0f;
+        transition_failed = false;
+        start_pos.clear();
+        target_dof_pos = torch::Tensor();
+        rl.rl_init_done = false;
+        rl.ClearOutputQueues();
+        rl.now_state = *fsm_state;
+
+        if (rl.config_name.empty())
+        {
+            rl.config_name = "himloco";
+        }
+
+        try
+        {
+            target_dof_pos = rl.ReadPolicyDefaultDofPos(rl.robot_name + "/" + rl.config_name);
+            if (target_dof_pos.size(1) != rl.params.num_of_dofs)
+            {
+                throw std::runtime_error("target default_dof_pos size does not match num_of_dofs");
+            }
+        }
+        catch (const std::exception &e)
+        {
+            std::cout << LOGGER::ERROR << "Bridge-to-RL transition failed to read config '" << rl.config_name << "': " << e.what() << std::endl;
+            transition_failed = true;
+            return;
+        }
+
+        start_pos.resize(rl.params.num_of_dofs);
+        for (int i = 0; i < rl.params.num_of_dofs; ++i)
+        {
+            start_pos[i] = rl.now_state.motor_state.q[i];
+        }
+
+        std::cout << LOGGER::INFO << "Bridge drive returning to RL pose: " << rl.config_name << std::endl;
+    }
+
+    void Run() override
+    {
+        if (transition_failed)
+        {
+            return;
+        }
+
+        rl.now_state = *fsm_state;
+        transition_percent += 1.0f / static_cast<float>(std::max(1, bridge_config.exit_to_rl_cycles));
+        transition_percent = std::min(transition_percent, 1.0f);
+
+        for (int i = 0; i < rl.params.num_of_dofs; ++i)
+        {
+            if (IsWheelIndex(rl, i))
+            {
+                fsm_command->motor_command.q[i] = rl.now_state.motor_state.q[i];
+                fsm_command->motor_command.dq[i] = 0.0;
+                fsm_command->motor_command.kp[i] = 0.0;
+                fsm_command->motor_command.kd[i] = bridge_config.kd[i];
+                fsm_command->motor_command.tau[i] = 0.0;
+            }
+            else
+            {
+                const double target_pos = target_dof_pos[0][i].item<double>();
+                fsm_command->motor_command.q[i] = (1 - transition_percent) * start_pos[i] + transition_percent * target_pos;
+                fsm_command->motor_command.dq[i] = 0.0;
+                fsm_command->motor_command.kp[i] = bridge_config.kp[i];
+                fsm_command->motor_command.kd[i] = bridge_config.kd[i];
+                fsm_command->motor_command.tau[i] = 0.0;
+            }
+        }
+
+        std::cout << "\r\033[K" << std::flush << LOGGER::INFO
+                  << "Bridge to RL pose " << std::fixed << std::setprecision(2)
+                  << transition_percent * 100.0f << "%" << std::flush;
+    }
+
+    void Exit() override {}
+
+    std::string CheckChange() override
+    {
+        if (rl.control.current_keyboard == Input::Keyboard::P || rl.control.current_gamepad == Input::Gamepad::LB_X)
+        {
+            return "RLFSMStatePassive";
+        }
+        else if (rl.control.current_keyboard == Input::Keyboard::Num9 || rl.control.current_gamepad == Input::Gamepad::B)
+        {
+            return "RLFSMStateGetDown";
+        }
+        else if (rl.control.current_keyboard == Input::Keyboard::Num0 || rl.control.current_gamepad == Input::Gamepad::A || transition_failed)
+        {
+            return "RLFSMStateGetUp";
+        }
+        else if (transition_percent == 1.0f)
+        {
+            return "RLFSMStateRL_Locomotion";
+        }
+        return state_name_;
+    }
+};
+
+class RLFSMStateLowBarDrive : public RLFSMState
+{
+public:
+    RLFSMStateLowBarDrive(RL *rl) : RLFSMState(*rl, "RLFSMStateLowBarDrive") {}
+
+    BridgeDriveConfig low_bar_config;
+    float prepare_percent = 0.0f;
+    bool drive_ready = false;
+    std::vector<double> start_pos;
+
+    void Enter() override
+    {
+        low_bar_config = ReadLowBarDriveConfig(rl);
+        prepare_percent = 0.0f;
+        drive_ready = false;
+        rl.rl_init_done = false;
+        rl.ClearOutputQueues();
+        rl.now_state = *fsm_state;
+
+        start_pos.resize(rl.params.num_of_dofs);
+        for (int i = 0; i < rl.params.num_of_dofs; ++i)
+        {
+            start_pos[i] = rl.now_state.motor_state.q[i];
+        }
+
+        std::cout << LOGGER::INFO << "Entered low-bar drive mode. Press '1' or RB+DPadUp to return to RL locomotion." << std::endl;
+    }
+
+    void Run() override
+    {
+        rl.now_state = *fsm_state;
+        if (!drive_ready)
+        {
+            prepare_percent += 1.0f / static_cast<float>(low_bar_config.prepare_cycles);
+            prepare_percent = std::min(prepare_percent, 1.0f);
+            if (prepare_percent == 1.0f)
+            {
+                drive_ready = true;
+                std::cout << std::endl << LOGGER::INFO << "Low-bar drive pose ready." << std::endl;
+            }
+        }
+
+        const double x = clamp(rl.control.x, -low_bar_config.max_x, low_bar_config.max_x);
+        const double yaw = clamp(rl.control.yaw, -low_bar_config.max_yaw, low_bar_config.max_yaw);
+        const double left_velocity = low_bar_config.wheel_velocity_scale * x - low_bar_config.yaw_to_wheel_velocity * yaw;
+        const double right_velocity = low_bar_config.wheel_velocity_scale * x + low_bar_config.yaw_to_wheel_velocity * yaw;
+
+        for (int i = 0; i < rl.params.num_of_dofs; ++i)
+        {
+            const bool is_wheel = IsWheelIndex(rl, i);
+            if (is_wheel)
+            {
+                const auto wheel_iter = std::find(rl.params.wheel_indices.begin(), rl.params.wheel_indices.end(), i);
+                const int wheel_id = static_cast<int>(std::distance(rl.params.wheel_indices.begin(), wheel_iter));
+                const bool is_left_wheel = i == 3 || i == 11;
+                const double wheel_velocity = is_left_wheel ? left_velocity : right_velocity;
+                fsm_command->motor_command.q[i] = rl.now_state.motor_state.q[i];
+                fsm_command->motor_command.dq[i] = low_bar_config.wheel_velocity_sign[wheel_id] * wheel_velocity;
+                fsm_command->motor_command.kp[i] = 0.0;
+                fsm_command->motor_command.kd[i] = low_bar_config.kd[i];
+                fsm_command->motor_command.tau[i] = 0.0;
+            }
+            else
+            {
+                const double target_pos = low_bar_config.dof_pos[i];
+                fsm_command->motor_command.q[i] = (1 - prepare_percent) * start_pos[i] + prepare_percent * target_pos;
+                fsm_command->motor_command.dq[i] = 0.0;
+                fsm_command->motor_command.kp[i] = low_bar_config.kp[i];
+                fsm_command->motor_command.kd[i] = low_bar_config.kd[i];
+                fsm_command->motor_command.tau[i] = 0.0;
+            }
+        }
+
+        std::cout << "\r\033[K" << std::flush << LOGGER::INFO
+                  << "Low-bar drive " << (drive_ready ? "ready" : "prepare")
+                  << " x:" << x << " yaw:" << yaw << std::flush;
+    }
+
+    void Exit() override
+    {}
+
+    std::string CheckChange() override
+    {
+        if (rl.control.current_keyboard == Input::Keyboard::P || rl.control.current_gamepad == Input::Gamepad::LB_X)
+        {
+            rl.control.x = 0.0;
+            rl.control.y = 0.0;
+            rl.control.yaw = 0.0;
+            return "RLFSMStatePassive";
+        }
+        else if (rl.control.current_keyboard == Input::Keyboard::Num9 || rl.control.current_gamepad == Input::Gamepad::B)
+        {
+            rl.control.x = 0.0;
+            rl.control.y = 0.0;
+            rl.control.yaw = 0.0;
+            return "RLFSMStateGetDown";
+        }
+        else if (rl.control.current_keyboard == Input::Keyboard::Num0 || rl.control.current_gamepad == Input::Gamepad::A)
+        {
+            rl.control.x = 0.0;
+            rl.control.y = 0.0;
+            rl.control.yaw = 0.0;
+            return "RLFSMStateGetUp";
+        }
+        else if (rl.control.current_keyboard == Input::Keyboard::Num1 || rl.control.current_gamepad == Input::Gamepad::RB_DPadUp)
+        {
+            rl.control.x = 0.0;
+            rl.control.y = 0.0;
+            rl.control.yaw = 0.0;
+            rl.control.current_keyboard = rl.control.last_keyboard;
+            rl.control.current_gamepad = Input::Gamepad::None;
+            return "RLFSMStateLowBarToRLTransition";
+        }
+        else if (rl.control.current_keyboard == Input::Keyboard::Num2 || rl.control.current_gamepad == Input::Gamepad::RB_DPadRight)
+        {
+            rl.control.current_keyboard = rl.control.last_keyboard;
+            rl.control.current_gamepad = Input::Gamepad::None;
+            return "RLFSMStateBridgeDrive";
+        }
+        return state_name_;
+    }
+};
+
+class RLFSMStateLowBarToRLTransition : public RLFSMState
+{
+public:
+    RLFSMStateLowBarToRLTransition(RL *rl) : RLFSMState(*rl, "RLFSMStateLowBarToRLTransition") {}
+
+    BridgeDriveConfig low_bar_config;
+    float transition_percent = 0.0f;
+    bool transition_failed = false;
+    std::vector<double> start_pos;
+    torch::Tensor target_dof_pos;
+
+    void Enter() override
+    {
+        low_bar_config = ReadLowBarDriveConfig(rl);
+        transition_percent = 0.0f;
+        transition_failed = false;
+        start_pos.clear();
+        target_dof_pos = torch::Tensor();
+        rl.rl_init_done = false;
+        rl.ClearOutputQueues();
+        rl.now_state = *fsm_state;
+
+        if (rl.config_name.empty())
+        {
+            rl.config_name = "himloco";
+        }
+
+        try
+        {
+            target_dof_pos = rl.ReadPolicyDefaultDofPos(rl.robot_name + "/" + rl.config_name);
+            if (target_dof_pos.size(1) != rl.params.num_of_dofs)
+            {
+                throw std::runtime_error("target default_dof_pos size does not match num_of_dofs");
+            }
+        }
+        catch (const std::exception &e)
+        {
+            std::cout << LOGGER::ERROR << "Low-bar-to-RL transition failed to read config '" << rl.config_name << "': " << e.what() << std::endl;
+            transition_failed = true;
+            return;
+        }
+
+        start_pos.resize(rl.params.num_of_dofs);
+        for (int i = 0; i < rl.params.num_of_dofs; ++i)
+        {
+            start_pos[i] = rl.now_state.motor_state.q[i];
+        }
+
+        std::cout << LOGGER::INFO << "Low-bar drive returning to RL pose: " << rl.config_name << std::endl;
+    }
+
+    void Run() override
+    {
+        if (transition_failed)
+        {
+            return;
+        }
+
+        rl.now_state = *fsm_state;
+        transition_percent += 1.0f / static_cast<float>(std::max(1, low_bar_config.exit_to_rl_cycles));
+        transition_percent = std::min(transition_percent, 1.0f);
+
+        for (int i = 0; i < rl.params.num_of_dofs; ++i)
+        {
+            if (IsWheelIndex(rl, i))
+            {
+                fsm_command->motor_command.q[i] = rl.now_state.motor_state.q[i];
+                fsm_command->motor_command.dq[i] = 0.0;
+                fsm_command->motor_command.kp[i] = 0.0;
+                fsm_command->motor_command.kd[i] = low_bar_config.kd[i];
+                fsm_command->motor_command.tau[i] = 0.0;
+            }
+            else
+            {
+                const double target_pos = target_dof_pos[0][i].item<double>();
+                fsm_command->motor_command.q[i] = (1 - transition_percent) * start_pos[i] + transition_percent * target_pos;
+                fsm_command->motor_command.dq[i] = 0.0;
+                fsm_command->motor_command.kp[i] = low_bar_config.kp[i];
+                fsm_command->motor_command.kd[i] = low_bar_config.kd[i];
+                fsm_command->motor_command.tau[i] = 0.0;
+            }
+        }
+
+        std::cout << "\r\033[K" << std::flush << LOGGER::INFO
+                  << "Low-bar to RL pose " << std::fixed << std::setprecision(2)
+                  << transition_percent * 100.0f << "%" << std::flush;
+    }
+
+    void Exit() override {}
+
+    std::string CheckChange() override
+    {
+        if (rl.control.current_keyboard == Input::Keyboard::P || rl.control.current_gamepad == Input::Gamepad::LB_X)
+        {
+            return "RLFSMStatePassive";
+        }
+        else if (rl.control.current_keyboard == Input::Keyboard::Num9 || rl.control.current_gamepad == Input::Gamepad::B)
+        {
+            return "RLFSMStateGetDown";
+        }
+        else if (rl.control.current_keyboard == Input::Keyboard::Num0 || rl.control.current_gamepad == Input::Gamepad::A || transition_failed)
+        {
+            return "RLFSMStateGetUp";
+        }
+        else if (transition_percent == 1.0f)
+        {
+            return "RLFSMStateRL_Locomotion";
+        }
+        return state_name_;
+    }
+};
+
 } // namespace blackw_fsm
 
 class BLACKWFSMFactory : public FSMFactory
@@ -497,6 +1125,14 @@ public:
             return std::make_shared<blackw_fsm::RLFSMStatePolicyTransition>(rl);
         else if (state_name == "RLFSMStatePolicyReload")
             return std::make_shared<blackw_fsm::RLFSMStatePolicyReload>(rl);
+        else if (state_name == "RLFSMStateBridgeDrive")
+            return std::make_shared<blackw_fsm::RLFSMStateBridgeDrive>(rl);
+        else if (state_name == "RLFSMStateBridgeToRLTransition")
+            return std::make_shared<blackw_fsm::RLFSMStateBridgeToRLTransition>(rl);
+        else if (state_name == "RLFSMStateLowBarDrive")
+            return std::make_shared<blackw_fsm::RLFSMStateLowBarDrive>(rl);
+        else if (state_name == "RLFSMStateLowBarToRLTransition")
+            return std::make_shared<blackw_fsm::RLFSMStateLowBarToRLTransition>(rl);
         return nullptr;
     }
     std::string GetType() const override { return "blackW"; }
@@ -508,7 +1144,11 @@ public:
             "RLFSMStateGetDown",
             "RLFSMStateRL_Locomotion",
             "RLFSMStatePolicyTransition",
-            "RLFSMStatePolicyReload"
+            "RLFSMStatePolicyReload",
+            "RLFSMStateBridgeDrive",
+            "RLFSMStateBridgeToRLTransition",
+            "RLFSMStateLowBarDrive",
+            "RLFSMStateLowBarToRLTransition"
         };
     }
     std::string GetInitialState() const override { return initial_state_; }
