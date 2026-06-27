@@ -11,3 +11,5 @@ blackW:
   policy_config_cycle:
     - himloco_flat
     - himloco_obstacle
+    - test_1
+    - test_2
