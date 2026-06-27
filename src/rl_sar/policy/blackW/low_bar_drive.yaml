@@ -20,7 +20,7 @@ blackW:
   # Set x = 0 and yaw != 0 for in-place differential steering.
   # The final per-wheel sign is multiplied by wheel_velocity_sign.
   wheel_velocity_scale: 10.0
-  yaw_to_wheel_velocity: 6.0
+  yaw_to_wheel_velocity: 5.0
   wheel_velocity_sign: [1.0, -1.0, 1.0, -1.0]
 
   # Joint order:
