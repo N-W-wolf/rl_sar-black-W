@@ -121,7 +121,7 @@ src/rl_sar/policy/<ROBOT>/<CONFIG>/
 - `policy` 内部顺序
 - 外部接口顺序
 
-普通 `GetUp` 的姿态插值周期由机器人级 `base.yaml` 配置。`getup_pre_cycles` 控制从当前姿态到预起身姿态的周期数，`getup_cycles` 控制从预起身姿态到 `default_dof_pos` 的周期数。`rl_sim` 控制周期通常为 `dt = 0.005` 秒，因此 `300` 个周期约为 `1.5` 秒；数值越大，动作越慢。
+普通 `GetUp` 的姿态插值周期由机器人级 `base.yaml` 配置。`black` 使用两段式起身：`getup_pre_cycles` 控制从当前姿态到预起身姿态的周期数，`getup_cycles` 控制从预起身姿态到 `default_dof_pos` 的周期数。`blackW` 使用单段式起身，只通过 `getup_cycles` 控制从当前姿态到 `default_dof_pos` 的周期数。`rl_sim` 控制周期通常为 `dt = 0.005` 秒，因此 `300` 个周期约为 `1.5` 秒；数值越大，动作越慢。
 
 `policy` 内部顺序由训练侧决定，`rl_sar` 中的这些字段必须始终跟随 `policy` 顺序：
 

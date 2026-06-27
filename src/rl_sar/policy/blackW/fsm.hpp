@@ -196,17 +196,8 @@ class RLFSMStateGetUp : public RLFSMState
 public:
     RLFSMStateGetUp(RL *rl) : RLFSMState(*rl, "RLFSMStateGetUp") {}
 
-    float pre_running_percent = 0.0f;
-    std::vector<float> pre_running_pos = {
-        0.00,  1.4, -2.2, 0.0,
-        0.00, -1.4,  2.2, 0.0,
-        0.00,  1.4, -2.2, 0.0,
-        0.00, -1.4,  2.2, 0.0
-    };
-
     void Enter() override
     {
-        pre_running_percent = 0.0f;
         rl.running_percent = 0.0f;
         rl.now_state = *fsm_state;
         rl.start_state = rl.now_state;
@@ -217,30 +208,14 @@ public:
         //printf("Running GetUp State\n");
         //std::cout << "\r\033[K" << " base_quat: " << rl.now_state.imu.quaternion<< std::flush;
         //std::cout << "angle vel: " << rl.now_state.imu.gyroscope << std::endl;
-        if (pre_running_percent < 1.0f)
-        {
-            pre_running_percent += 1.0f / static_cast<float>(rl.getup_pre_cycles);
-            pre_running_percent = std::min(pre_running_percent, 1.0f);
-
-            for (int i = 0; i < rl.params.num_of_dofs; ++i)
-            {
-                fsm_command->motor_command.q[i] = (1 - pre_running_percent) * rl.now_state.motor_state.q[i] + pre_running_percent * pre_running_pos[i];
-                fsm_command->motor_command.dq[i] = 0;
-                fsm_command->motor_command.kp[i] = rl.params.fixed_kp[0][i].item<double>();
-                fsm_command->motor_command.kd[i] = rl.params.fixed_kd[0][i].item<double>();
-                fsm_command->motor_command.tau[i] = 0;
-            }
-            std::cout << "\r\033[K" << std::flush << LOGGER::INFO << "Pre Getting up " << std::fixed << std::setprecision(2) << pre_running_percent * 100.0f << "%" << std::flush;
-        }
-
-        if (pre_running_percent == 1 && rl.running_percent < 1.0f)
+        if (rl.running_percent < 1.0f)
         {
             rl.running_percent += 1.0f / static_cast<float>(rl.getup_cycles);
             rl.running_percent = std::min(rl.running_percent, 1.0f);
 
             for (int i = 0; i < rl.params.num_of_dofs; ++i)
             {
-                fsm_command->motor_command.q[i] = (1 - rl.running_percent) * pre_running_pos[i] + rl.running_percent * rl.params.default_dof_pos[0][i].item<double>();
+                fsm_command->motor_command.q[i] = (1 - rl.running_percent) * rl.start_state.motor_state.q[i] + rl.running_percent * rl.params.default_dof_pos[0][i].item<double>();
                 fsm_command->motor_command.dq[i] = 0;
                 fsm_command->motor_command.kp[i] = rl.params.fixed_kp[0][i].item<double>();
                 fsm_command->motor_command.kd[i] = rl.params.fixed_kd[0][i].item<double>();
