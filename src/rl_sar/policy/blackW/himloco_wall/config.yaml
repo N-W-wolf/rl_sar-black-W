@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 blackW/himloco_wall:
-  model_name: "policy_0626_5_Jun26_12-23-31_.pt"
+  model_name: "policy_0626_6_Jun26_12-30-56_.pt"
   num_observations: 57
   observations: ["commands","ang_vel", "gravity_vec", "dof_pos", "dof_vel", "actions"]
   observations_history: [0,1,2,3,4,5]  # 0 is the latest observation
