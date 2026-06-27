@@ -108,7 +108,7 @@ public:
         //std::cout << "angle vel: " << rl.now_state.imu.gyroscope << std::endl;
         if (pre_running_percent < 1.0f)
         {
-            pre_running_percent += 1.0f / 300.0f;
+            pre_running_percent += 1.0f / static_cast<float>(rl.getup_pre_cycles);
             pre_running_percent = std::min(pre_running_percent, 1.0f);
 
             for (int i = 0; i < rl.params.num_of_dofs; ++i)
@@ -124,7 +124,7 @@ public:
 
         if (pre_running_percent == 1 && rl.running_percent < 1.0f)
         {
-            rl.running_percent += 1.0f / 400.0f;
+            rl.running_percent += 1.0f / static_cast<float>(rl.getup_cycles);
             rl.running_percent = std::min(rl.running_percent, 1.0f);
 
             for (int i = 0; i < rl.params.num_of_dofs; ++i)

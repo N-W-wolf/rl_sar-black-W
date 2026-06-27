@@ -1,0 +1,44 @@
+# Copyright (c) 2024-2025 Ziqi Fan
+# SPDX-License-Identifier: Apache-2.0
+
+blackW:
+  # Number of control cycles used to move from the current pose to the
+  # car-drive pose. The control loop period is 5 ms in rl_sim.
+  prepare_cycles: 150
+
+  # Number of control cycles used to move from car-drive pose to the
+  # selected RL policy default_dof_pos before entering RL locomotion.
+  exit_to_rl_cycles: 150
+
+  # x supports forward and reverse; y command is ignored in this mode.
+  max_x: 2.0
+  max_yaw: 3.0
+
+  # dq command for wheels:
+  #   left_wheels  = wheel_velocity_scale * x - yaw_to_wheel_velocity * yaw
+  #   right_wheels = wheel_velocity_scale * x + yaw_to_wheel_velocity * yaw
+  # Set x = 0 and yaw != 0 for in-place differential steering.
+  # The final per-wheel sign is multiplied by wheel_velocity_sign.
+  wheel_velocity_scale: 10.0
+  yaw_to_wheel_velocity: 5.0
+  wheel_velocity_sign: [1.0, -1.0, 1.0, -1.0]
+
+  # Joint order:
+  # FL_hip, FL_thigh, FL_calf, FL_wheel,
+  # FR_hip, FR_thigh, FR_calf, FR_wheel,
+  # RL_hip, RL_thigh, RL_calf, RL_wheel,
+  # RR_hip, RR_thigh, RR_calf, RR_wheel
+  car_default_dof_pos: [0.1, 1.0, -2.3, 0.0,
+                       -0.1, -1.0, 2.3, 0.0,
+                       -0.1, 1.2, -2.3, 0.0,
+                        0.1, -1.2, 2.3, 0.0]
+
+  kp: [100.0, 100.0, 100.0, 0.0,
+       100.0, 100.0, 100.0, 0.0,
+       100.0, 100.0, 100.0, 0.0,
+       100.0, 100.0, 100.0, 0.0]
+
+  kd: [5.0, 5.0, 5.0, 2.0,
+       5.0, 5.0, 5.0, 2.0,
+       5.0, 5.0, 5.0, 2.0,
+       5.0, 5.0, 5.0, 2.0]

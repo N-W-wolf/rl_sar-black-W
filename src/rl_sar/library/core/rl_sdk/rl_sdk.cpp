@@ -651,6 +651,8 @@ void RL::ReadYamlBase(std::string robot_path)
 
     this->params.dt = config["dt"].as<double>();
     this->params.decimation = config["decimation"].as<int>();
+    this->getup_pre_cycles = config["getup_pre_cycles"] ? std::max(1, config["getup_pre_cycles"].as<int>()) : 300;
+    this->getup_cycles = config["getup_cycles"] ? std::max(1, config["getup_cycles"].as<int>()) : 400;
     this->params.wheel_indices = ReadVectorFromYaml<int>(config["wheel_indices"]);
     this->params.num_of_dofs = config["num_of_dofs"].as<int>();
     this->params.fixed_kp = torch::tensor(ReadVectorFromYaml<double>(config["fixed_kp"])).view({1, -1});

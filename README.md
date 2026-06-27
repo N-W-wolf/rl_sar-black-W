@@ -121,6 +121,8 @@ src/rl_sar/policy/<ROBOT>/<CONFIG>/
 - `policy` 内部顺序
 - 外部接口顺序
 
+普通 `GetUp` 的姿态插值周期由机器人级 `base.yaml` 配置。`getup_pre_cycles` 控制从当前姿态到预起身姿态的周期数，`getup_cycles` 控制从预起身姿态到 `default_dof_pos` 的周期数。`rl_sim` 控制周期通常为 `dt = 0.005` 秒，因此 `300` 个周期约为 `1.5` 秒；数值越大，动作越慢。
+
 `policy` 内部顺序由训练侧决定，`rl_sar` 中的这些字段必须始终跟随 `policy` 顺序：
 
 - `default_dof_pos`
@@ -225,6 +227,7 @@ ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: 'shutdown'}"
 | `T` | `black`/`blackW` 下按 `policy_config_cycle` 切换模型 |
 | `2` | `blackW` 下进入固定姿态桥模式 |
 | `3` | `blackW` 下进入限高杆模式 |
+| `4` | `blackW` 下进入固定姿态车模式 |
 
 ## 手柄控制
 
@@ -240,6 +243,7 @@ ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: 'shutdown'}"
 | `RB + X` | 暂停/继续仿真 |
 | `RB + DPadRight` | `blackW` 下进入固定姿态桥模式 |
 | `RB + DPadDown` | `blackW` 下进入限高杆模式 |
+| `RB + DPadLeft` | `blackW` 下进入固定姿态车模式 |
 | `X` | 切换导航模式 |
 | `Y` | `black`/`blackW` 下按 `policy_config_cycle` 切换模型 |
 | `LY/LX/RX` | 前后、左右、偏航速度 |
@@ -301,6 +305,9 @@ ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: '2'}"
 
 # 限高杆模式：键盘 3 或手柄 RB + DPadDown
 ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: '3'}"
+
+# 固定姿态车模式：键盘 4 或手柄 RB + DPadLeft
+ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: '4'}"
 ```
 
 退出方式由上层或人工触发：
@@ -308,13 +315,14 @@ ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: '3'}"
 - `1` 或 `RB + DPadUp`：先过渡到当前选中 RL 策略的 `default_dof_pos`，再进入 RL locomotion。
 - `2` 或 `RB + DPadRight`：进入桥模式。
 - `3` 或 `RB + DPadDown`：进入限高杆模式。
+- `4` 或 `RB + DPadLeft`：进入固定姿态车模式。
 - `0` 或 `A`：回到 `GetUp`。
 - `9` 或 `B`：回到 `GetDown`。
 - `P` 或 `LB + X`：进入 passive。
 
-桥模式和限高杆模式之间互相切换时不会主动清零 `x/yaw`，姿态插值过程中轮子会继续按当前命令行驶。切回 RL、`GetUp`、`GetDown` 或 passive 时会清零速度命令。
+桥模式、限高杆模式和固定姿态车模式之间互相切换时不会主动清零 `x/yaw`，姿态插值过程中轮子会继续按当前命令行驶。切回 RL、`GetUp`、`GetDown` 或 passive 时会清零速度命令。
 
-桥模式参数位于 [bridge_drive.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/bridge_drive.yaml)，限高杆模式参数位于 [low_bar_drive.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/low_bar_drive.yaml)。主要配置包括固定姿态、进入姿态的 `prepare_cycles`、回到 RL 默认姿态的 `exit_to_rl_cycles`、腿部 `kp/kd`、轮速限制和轮速方向 `wheel_velocity_sign`。首次实测前建议先悬空确认轮速方向，再低速上地调试。
+桥模式参数位于 [bridge_drive.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/bridge_drive.yaml)，限高杆模式参数位于 [low_bar_drive.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/low_bar_drive.yaml)，固定姿态车模式参数位于 [car_drive.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/car_drive.yaml)。主要配置包括固定姿态、进入姿态的 `prepare_cycles`、回到 RL 默认姿态的 `exit_to_rl_cycles`、腿部 `kp/kd`、轮速限制和轮速方向 `wheel_velocity_sign`。首次实测前建议先悬空确认轮速方向，再低速上地调试。
 
 ### 新增可切换模型
 

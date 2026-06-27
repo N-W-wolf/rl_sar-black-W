@@ -4,6 +4,8 @@
 black:
   dt: 0.005
   decimation: 4
+  getup_pre_cycles: 300
+  getup_cycles: 400
   fixed_kp: [80.0, 80.0, 80.0,
              80.0, 80.0, 80.0,
              80.0, 80.0, 80.0,
