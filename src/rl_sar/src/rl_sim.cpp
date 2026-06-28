@@ -583,6 +583,12 @@ void RL_Sim::RobotControl()
             this->control.current_keyboard = this->control.last_keyboard;
             this->control.current_gamepad = Input::Gamepad::None;
         }
+        if (this->control.navigation_mode)
+        {
+            this->control.x = this->cmd_vel.linear.x;
+            this->control.y = this->cmd_vel.linear.y;
+            this->control.yaw = this->cmd_vel.angular.z;
+        }
 
         this->GetState(&this->robot_state);
         //std::cout<<"gyro: "<<this->robot_state.imu.gyroscope[0]<<", "<<this->robot_state.imu.gyroscope[1]<<", "<<this->robot_state.imu.gyroscope[2]<< std::endl;
