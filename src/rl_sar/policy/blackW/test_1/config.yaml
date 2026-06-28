@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 blackW/test_1:
-  model_name: "policy_0627_2_Jun27_17-07-17_obstacle.pt"
+  model_name: "policy_0628_1_Jun28_00-27-00_obstacle.pt"
   num_observations: 57
   observations: ["commands","ang_vel", "gravity_vec", "dof_pos", "dof_vel", "actions"]
   observations_history: [0,1,2,3,4,5]  # 0 is the latest observation
