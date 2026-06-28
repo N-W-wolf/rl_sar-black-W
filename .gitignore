@@ -31,9 +31,4 @@ Thumbs.db
 *.log
 *.csv
 
-# Local model artifacts placed during deployment/debug
-*.pt
-*.pth
-*.onnx
-
 .codex/
