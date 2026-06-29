@@ -104,6 +104,25 @@ bool IsPolicyToggleCommand(const std::string &input)
 {
     return input == "toggle" || input == "toggle_policy" || input == "policy_toggle";
 }
+
+std::string JsonEscape(const std::string &input)
+{
+    std::string output;
+    output.reserve(input.size());
+    for (char ch : input)
+    {
+        switch (ch)
+        {
+        case '\\': output += "\\\\"; break;
+        case '"': output += "\\\""; break;
+        case '\n': output += "\\n"; break;
+        case '\r': output += "\\r"; break;
+        case '\t': output += "\\t"; break;
+        default: output += ch; break;
+        }
+    }
+    return output;
+}
 } // namespace
 
 RL_Sim::RL_Sim()
@@ -247,8 +266,11 @@ RL_Sim::RL_Sim()
         "/rl_sim/policy_switch_done", rclcpp::QoS(1).transient_local().reliable());
     this->policy_switch_status_publisher = this->create_publisher<std_msgs::msg::String>(
         "/rl_sim/policy_switch_status", rclcpp::QoS(1).transient_local().reliable());
+    this->runtime_status_publisher = this->create_publisher<std_msgs::msg::String>(
+        "/rl_sim/runtime_status", rclcpp::QoS(1).transient_local().reliable());
     this->PublishPolicySwitchDone(true);
     this->PublishPolicySwitchStatus("ready " + this->config_name);
+    this->PublishRuntimeStatus();
 
     // subscriber
     this->cmd_vel_subscriber = this->create_subscription<geometry_msgs::msg::Twist>(
@@ -503,6 +525,26 @@ void RL_Sim::PublishPolicySwitchStatus(const std::string &status)
 #endif
 }
 
+void RL_Sim::PublishRuntimeStatus()
+{
+#if defined(USE_ROS2)
+    if (!this->runtime_status_publisher)
+    {
+        return;
+    }
+    const std::string fsm_state = this->fsm.current_state_ ? this->fsm.current_state_->GetStateName() : "";
+    std_msgs::msg::String msg;
+    msg.data = "{"
+        "\"robot_name\":\"" + JsonEscape(this->robot_name) + "\","
+        "\"fsm_state\":\"" + JsonEscape(fsm_state) + "\","
+        "\"policy_config\":\"" + JsonEscape(this->config_name) + "\","
+        "\"model_name\":\"" + JsonEscape(this->params.model_name) + "\","
+        "\"navigation_mode\":" + std::string(this->control.navigation_mode ? "true" : "false") +
+        "}";
+    this->runtime_status_publisher->publish(msg);
+#endif
+}
+
 void RL_Sim::RobotControl()
 {
     if (this->control.current_keyboard == Input::Keyboard::R || this->control.current_gamepad == Input::Gamepad::RB_Y)
@@ -608,6 +650,11 @@ void RL_Sim::RobotControl()
         this->GetState(&this->robot_state);
         //std::cout<<"gyro: "<<this->robot_state.imu.gyroscope[0]<<", "<<this->robot_state.imu.gyroscope[1]<<", "<<this->robot_state.imu.gyroscope[2]<< std::endl;
         this->StateController(&this->robot_state, &this->robot_command);
+        if (++this->runtime_status_publish_counter >= 20)
+        {
+            this->runtime_status_publish_counter = 0;
+            this->PublishRuntimeStatus();
+        }
         this->SetCommand(&this->robot_command);
     }
 }

@@ -17,8 +17,13 @@ RNAME="${1:-blackW}"
 POLICY_CONFIG="${2:-himloco}"
 
 PARAM_PID=""
+UI_PID=""
 
 cleanup() {
+    if [[ -n "${UI_PID}" ]] && kill -0 "${UI_PID}" 2>/dev/null; then
+        kill "${UI_PID}" 2>/dev/null || true
+        wait "${UI_PID}" 2>/dev/null || true
+    fi
     if [[ -n "${PARAM_PID}" ]] && kill -0 "${PARAM_PID}" 2>/dev/null; then
         kill "${PARAM_PID}" 2>/dev/null || true
         wait "${PARAM_PID}" 2>/dev/null || true
@@ -35,6 +40,12 @@ ros2 run demo_nodes_cpp parameter_blackboard --ros-args \
 PARAM_PID=$!
 
 sleep 1
+
+echo "[INFO] Starting rl_sim status UI at http://127.0.0.1:8765"
+python3 src/rl_sar/scripts/rl_sim_status_ui.py --ros-args \
+    -p port:=8765 \
+    -p open_browser:=true &
+UI_PID=$!
 
 echo "[INFO] Starting rl_sim in foreground. Keyboard input stays on this terminal."
 echo "[INFO] Press Ctrl-C to stop rl_sim and clean up parameter_blackboard."

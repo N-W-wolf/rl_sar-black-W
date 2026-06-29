@@ -67,6 +67,7 @@ private:
     void SetCommand(const RobotCommand<double> *command) override;
     void PublishPolicySwitchDone(bool done) override;
     void PublishPolicySwitchStatus(const std::string &status) override;
+    void PublishRuntimeStatus();
     void RunModel();
     void RobotControl();
 
@@ -122,6 +123,7 @@ private:
     rclcpp::Publisher<robot_msgs::msg::RobotCommand>::SharedPtr robot_command_publisher;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr policy_switch_done_publisher;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr policy_switch_status_publisher;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr runtime_status_publisher;
     rclcpp::Subscription<robot_msgs::msg::RobotState>::SharedPtr robot_state_subscriber;
     rclcpp::Client<rcl_interfaces::srv::GetParameters>::SharedPtr param_client;
     void GazeboImuCallback(const sensor_msgs::msg::Imu::SharedPtr msg);
@@ -136,6 +138,7 @@ private:
     bool has_previous_joy_msg = false;
     std::string gazebo_model_name;
     int motiontime = 0;
+    int runtime_status_publish_counter = 0;
     std::map<std::string, double> joint_positions;
     std::map<std::string, double> joint_velocities;
     std::map<std::string, double> joint_efforts;

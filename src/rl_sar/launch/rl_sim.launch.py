@@ -35,6 +35,17 @@ def generate_launch_description():
             "policy_config": policy_config_value,
         }],
     )
+
+    status_ui_node = Node(
+        package="rl_sar",
+        executable="rl_sim_status_ui.py",
+        name="rl_sim_status_ui",
+        output="screen",
+        parameters=[{
+            "port": 8765,
+            "open_browser": True,
+        }],
+    )
     
     # joy_node = Node(
     #     package='joy',
@@ -68,6 +79,8 @@ def generate_launch_description():
         LogInfo(msg="Use /rl_sim/debug_key for interactive debug input under ros2 launch."),
         LogInfo(msg="Example: ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String \"{data: '0'}\""),
         LogInfo(msg="Publish {data: 'shutdown'} to stop rl_sim and let launch cleanly exit all child processes."),
+        LogInfo(msg="Status UI: http://127.0.0.1:8765"),
         node,
         param_node,
+        status_ui_node,
     ])
