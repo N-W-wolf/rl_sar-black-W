@@ -41,10 +41,8 @@ PARAM_PID=$!
 
 sleep 1
 
-echo "[INFO] Starting rl_sim status UI at http://127.0.0.1:8765"
-python3 src/rl_sar/scripts/rl_sim_status_ui.py --ros-args \
-    -p port:=8765 \
-    -p open_browser:=true &
+echo "[INFO] Starting rl_sim status UI window"
+python3 src/rl_sar/scripts/rl_sim_status_ui.py &
 UI_PID=$!
 
 echo "[INFO] Starting rl_sim in foreground. Keyboard input stays on this terminal."
