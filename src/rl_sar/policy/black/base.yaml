@@ -6,6 +6,7 @@ black:
   decimation: 4
   getup_pre_cycles: 300
   getup_cycles: 400
+  command_limits: [2.0, 1.0, 3.0]
   fixed_kp: [80.0, 80.0, 80.0,
              80.0, 80.0, 80.0,
              80.0, 80.0, 80.0,

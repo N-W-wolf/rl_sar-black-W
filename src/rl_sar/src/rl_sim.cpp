@@ -19,6 +19,18 @@ double ApplyDeadband(double value, double deadband)
     return std::fabs(value) < deadband ? 0.0 : value;
 }
 
+double ApplyLimit(double value, double limit)
+{
+    const double abs_limit = std::fabs(limit);
+    return std::max(-abs_limit, std::min(value, abs_limit));
+}
+
+double CommandLimit(const ModelParams &params, size_t index)
+{
+    static const double default_limits[] = {2.0, 1.0, 3.0};
+    return index < params.command_limits.size() ? params.command_limits[index] : default_limits[index];
+}
+
 std::string NormalizeDebugInput(std::string input)
 {
     input.erase(input.begin(), std::find_if(input.begin(), input.end(), [](unsigned char ch) { return !std::isspace(ch); }));
@@ -589,6 +601,9 @@ void RL_Sim::RobotControl()
             this->control.y = this->cmd_vel.linear.y;
             this->control.yaw = this->cmd_vel.angular.z;
         }
+        this->control.x = ApplyLimit(this->control.x, CommandLimit(this->params, 0));
+        this->control.y = ApplyLimit(this->control.y, CommandLimit(this->params, 1));
+        this->control.yaw = ApplyLimit(this->control.yaw, CommandLimit(this->params, 2));
 
         this->GetState(&this->robot_state);
         //std::cout<<"gyro: "<<this->robot_state.imu.gyroscope[0]<<", "<<this->robot_state.imu.gyroscope[1]<<", "<<this->robot_state.imu.gyroscope[2]<< std::endl;
@@ -800,9 +815,9 @@ void RL_Sim::JoyCallback(
     if (rising(rb && dpad_left, previous_rb && previous_dpad_left)) this->control.SetGamepad(Input::Gamepad::RB_DPadLeft);
     if (rising(lb && rb, previous_lb && previous_rb)) this->control.SetGamepad(Input::Gamepad::LB_RB);
 
-    this->control.x = ApplyDeadband(axis(1) * 2, kLinearCommandDeadband); // LY
-    this->control.y = ApplyDeadband(axis(0) * 1, kLinearCommandDeadband); // LX
-    this->control.yaw = ApplyDeadband(axis(3) * 3.0, kYawCommandDeadband); // RX
+    this->control.x = ApplyLimit(ApplyDeadband(axis(1) * 2, kLinearCommandDeadband), CommandLimit(this->params, 0)); // LY
+    this->control.y = ApplyLimit(ApplyDeadband(axis(0) * 1, kLinearCommandDeadband), CommandLimit(this->params, 1)); // LX
+    this->control.yaw = ApplyLimit(ApplyDeadband(axis(3) * 3.0, kYawCommandDeadband), CommandLimit(this->params, 2)); // RX
 
     this->previous_joy_msg = this->joy_msg;
     this->has_previous_joy_msg = true;
@@ -834,15 +849,15 @@ void RL_Sim::RunModel()
         this->episode_length_buf += 1;
         //this->obs.lin_vel = torch::tensor({{this->vel.linear.x, this->vel.linear.y, this->vel.linear.z}});
         this->obs.ang_vel = torch::tensor(this->robot_state.imu.gyroscope).unsqueeze(0);
-        if (this->control.navigation_mode)
-        {
-            this->obs.commands = torch::tensor({{this->cmd_vel.linear.x, this->cmd_vel.linear.y, this->cmd_vel.angular.z}});
-        }
-        else
-        {
-            //this->phase=std::fmod(episode_length_buf * this->params.dt,0.5)/0.5;
-            this->obs.commands = torch::tensor({{this->control.x, this->control.y, this->control.yaw}});
-        }
+        //this->phase=std::fmod(episode_length_buf * this->params.dt,0.5)/0.5;
+        const double command_x = this->control.navigation_mode ? this->cmd_vel.linear.x : this->control.x;
+        const double command_y = this->control.navigation_mode ? this->cmd_vel.linear.y : this->control.y;
+        const double command_yaw = this->control.navigation_mode ? this->cmd_vel.angular.z : this->control.yaw;
+        this->obs.commands = torch::tensor({{
+            ApplyLimit(command_x, CommandLimit(this->params, 0)),
+            ApplyLimit(command_y, CommandLimit(this->params, 1)),
+            ApplyLimit(command_yaw, CommandLimit(this->params, 2))
+        }});
         this->obs.base_quat = torch::tensor(this->robot_state.imu.quaternion).unsqueeze(0);
         this->obs.dof_pos = torch::tensor(this->robot_state.motor_state.q).narrow(0, 0, this->params.num_of_dofs).unsqueeze(0);
         this->obs.dof_vel = torch::tensor(this->robot_state.motor_state.dq).narrow(0, 0, this->params.num_of_dofs).unsqueeze(0);

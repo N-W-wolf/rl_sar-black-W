@@ -659,6 +659,20 @@ void RL::ReadYamlBase(std::string robot_path)
     this->params.fixed_kd = torch::tensor(ReadVectorFromYaml<double>(config["fixed_kd"])).view({1, -1});
     this->params.torque_limits = torch::tensor(ReadVectorFromYaml<double>(config["torque_limits"])).view({1, -1});
     this->params.default_dof_pos = torch::tensor(ReadVectorFromYaml<double>(config["default_dof_pos"])).view({1, -1});
+    this->params.command_limits = {2.0, 1.0, 3.0};
+    if (config["command_limits"])
+    {
+        const std::vector<double> command_limits = ReadVectorFromYaml<double>(config["command_limits"]);
+        if (command_limits.size() == 3)
+        {
+            this->params.command_limits = command_limits;
+        }
+        else
+        {
+            std::cout << LOGGER::WARNING << "Ignoring command_limits in " << config_path
+                      << ": expected [x, y, yaw]. Using [2.0, 1.0, 3.0]." << std::endl;
+        }
+    }
     this->params.joint_names = ReadVectorFromYaml<std::string>(config["joint_names"]);
     this->params.joint_controller_names = ReadVectorFromYaml<std::string>(config["joint_controller_names"]);
     this->params.joint_mapping = ReadVectorFromYaml<int>(config["joint_mapping"]);

@@ -149,6 +149,7 @@ struct ModelParams
     torch::Tensor fixed_kp;
     torch::Tensor fixed_kd;
     torch::Tensor commands_scale;
+    std::vector<double> command_limits;
     torch::Tensor default_dof_pos;
     std::vector<std::string> joint_controller_names;
     std::vector<std::string> joint_names;
