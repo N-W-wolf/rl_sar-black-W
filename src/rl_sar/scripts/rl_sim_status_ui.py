@@ -51,6 +51,16 @@ COLORS = {
     "stale": "#9a3412",
 }
 
+POLICY_PALETTE = [
+    ("#0f766e", "#def7f1"),
+    ("#2563eb", "#e5efff"),
+    ("#7c3aed", "#f0e9ff"),
+    ("#c2410c", "#ffeadb"),
+    ("#b45309", "#fff2d6"),
+    ("#be185d", "#ffe4f0"),
+    ("#047857", "#e1f6e9"),
+]
+
 
 class StatusStore:
     def __init__(self):
@@ -151,6 +161,11 @@ class StatusWindow:
                 return font
         return self.font(min_size, weight)
 
+    def palette_for_policy(self, policy):
+        policy = str(policy or "")
+        index = sum((i + 1) * ord(ch) for i, ch in enumerate(policy)) % len(POLICY_PALETTE)
+        return POLICY_PALETTE[index]
+
     def draw_round_rect(self, x1, y1, x2, y2, radius, fill, outline=None, width=1):
         radius = min(radius, (x2 - x1) / 2, (y2 - y1) / 2)
         points = [
@@ -168,12 +183,11 @@ class StatusWindow:
         s = min(w / 1120.0, h / 660.0)
 
         margin = 28 * s
-        gap = 16 * s
         top_h = 72 * s
-        details_h = 128 * s
+        details_h = max(178 * s, h * 0.30)
         mode_y1 = margin + top_h + 18 * s
         mode_y2 = h - margin - details_h - 18 * s
-        mode_y2 = max(mode_y1 + 190 * s, mode_y2)
+        mode_y2 = max(mode_y1 + 170 * s, mode_y2)
         details_y1 = mode_y2 + 18 * s
         details_y2 = h - margin
 
@@ -189,7 +203,6 @@ class StatusWindow:
         sub_font = self.font(12 * s)
         pill_font = self.font(13 * s, "bold")
         label_font = self.font(13 * s, "bold")
-        value_font = self.font(26 * s, "bold")
 
         title_y = margin + 2 * s
         sub_y = title_y + title_font.metrics("linespace") + 5 * s
@@ -216,27 +229,43 @@ class StatusWindow:
         mode_text = self.fit_text(mode, mode_font, mode_max_width)
         c.create_text(margin + 34 * s, (mode_y1 + mode_y2) / 2 + 18 * s, anchor="w", text=mode_text, fill=COLORS["ink"], font=mode_font)
 
-        labels = ["Robot", "Policy", "Model", "Navigation"]
-        values = [
-            status.get("robot_name", "-"),
-            status.get("policy_config", "-"),
-            status.get("model_name", "-"),
-            "ON" if status.get("navigation_mode") is True else "OFF" if status.get("navigation_mode") is False else "-",
-        ]
-        tile_gap = 12 * s
-        tile_w = (w - 2 * margin - 3 * tile_gap) / 4
-        for i, (label, value) in enumerate(zip(labels, values)):
-            x1 = margin + i * (tile_w + tile_gap)
-            x2 = x1 + tile_w
-            self.draw_round_rect(x1, details_y1, x2, details_y2, 7 * s, COLORS["panel"], COLORS["line"], 1)
-            c.create_text(x1 + 18 * s, details_y1 + 18 * s, anchor="nw", text=label.upper(), fill=COLORS["muted"], font=label_font)
-            max_value_width = tile_w - 36 * s
-            if label in ("Policy", "Model"):
-                tile_value_font = self.adaptive_font(value, max_value_width, 26 * s, 13 * s, "bold")
-            else:
-                tile_value_font = value_font
+        robot = status.get("robot_name", "-")
+        policy = status.get("policy_config", "-")
+        model = status.get("model_name", "-")
+        navigation = "ON" if status.get("navigation_mode") is True else "OFF" if status.get("navigation_mode") is False else "-"
+
+        policy_accent, policy_bg = self.palette_for_policy(policy)
+        nav_accent = accent if navigation == "ON" else COLORS["muted"]
+        nav_bg = accent_bg if navigation == "ON" else COLORS["panel"]
+
+        info_gap = 14 * s
+        left_w = max(190 * s, (w - 2 * margin - info_gap) * 0.28)
+        right_w = w - 2 * margin - info_gap - left_w
+        left_x1 = margin
+        left_x2 = left_x1 + left_w
+        right_x1 = left_x2 + info_gap
+        right_x2 = w - margin
+        row_gap = 12 * s
+        row_h = (details_y2 - details_y1 - row_gap) / 2
+
+        def draw_tile(x1, y1, x2, y2, label, value, bg, stripe, base_size, min_size):
+            self.draw_round_rect(x1, y1, x2, y2, 7 * s, bg, COLORS["line"], 1)
+            c.create_rectangle(x1, y1, x1 + 8 * s, y2, fill=stripe, outline=stripe)
+            c.create_text(x1 + 22 * s, y1 + 15 * s, anchor="nw", text=label.upper(), fill=COLORS["muted"], font=label_font)
+            max_value_width = x2 - x1 - 44 * s
+            max_value_height = y2 - y1 - 54 * s
+            tile_value_font = self.adaptive_font(value, max_value_width, base_size, min_size, "bold")
+            current_size = int(tile_value_font.cget("size"))
+            while tile_value_font.metrics("linespace") > max_value_height and current_size > int(min_size):
+                current_size -= 1
+                tile_value_font = self.font(current_size, "bold")
             fitted = self.fit_text(value, tile_value_font, max_value_width)
-            c.create_text(x1 + 18 * s, details_y2 - 24 * s, anchor="sw", text=fitted, fill=COLORS["ink"], font=tile_value_font)
+            c.create_text(x1 + 22 * s, y2 - 18 * s, anchor="sw", text=fitted, fill=COLORS["ink"], font=tile_value_font)
+
+        draw_tile(left_x1, details_y1, left_x2, details_y1 + row_h, "Robot", robot, COLORS["panel"], accent, 28 * s, 13 * s)
+        draw_tile(left_x1, details_y1 + row_h + row_gap, left_x2, details_y2, "Navigation", navigation, nav_bg, nav_accent, 30 * s, 14 * s)
+        draw_tile(right_x1, details_y1, right_x2, details_y1 + row_h, "Policy", policy, policy_bg, policy_accent, 38 * s, 15 * s)
+        draw_tile(right_x1, details_y1 + row_h + row_gap, right_x2, details_y2, "Model", model, COLORS["panel"], accent, 36 * s, 15 * s)
 
 
 def spin_ros(node):
