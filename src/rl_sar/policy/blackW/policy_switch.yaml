@@ -13,4 +13,4 @@ blackW:
     - himloco_obstacle
     - himloco_stair
     - himloco_test1
-    #- himloco_test2
+    - himloco_test2
