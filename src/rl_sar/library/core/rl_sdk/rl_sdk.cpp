@@ -33,6 +33,22 @@ std::string JoinPath(const std::string &base, const std::string &name)
 {
     return base + "/" + name;
 }
+
+torch::Tensor SelectDofColumns(const torch::Tensor &values, const std::vector<int> &indices)
+{
+    if (indices.empty())
+    {
+        return values;
+    }
+
+    std::vector<int64_t> tensor_indices;
+    tensor_indices.reserve(indices.size());
+    for (int index : indices)
+    {
+        tensor_indices.push_back(static_cast<int64_t>(index));
+    }
+    return values.index_select(1, torch::tensor(tensor_indices, torch::kLong));
+}
 } // namespace
 
 template <typename T>
@@ -84,16 +100,29 @@ torch::Tensor RL::ComputeObservation()
         }
         else if (observation == "dof_pos")
         {
-            torch::Tensor dof_pos_rel = this->obs.dof_pos - this->params.default_dof_pos;
+            torch::Tensor dof_pos_rel = SelectDofColumns(this->obs.dof_pos, this->params.policy_dof_indices) -
+                                        SelectDofColumns(this->params.default_dof_pos, this->params.policy_dof_indices);
             for (int i : this->params.wheel_indices)
             {
-                dof_pos_rel[0][i] = 0.0;
+                if (this->params.policy_dof_indices.empty())
+                {
+                    dof_pos_rel[0][i] = 0.0;
+                }
+                else
+                {
+                    const auto iter = std::find(this->params.policy_dof_indices.begin(), this->params.policy_dof_indices.end(), i);
+                    if (iter != this->params.policy_dof_indices.end())
+                    {
+                        const auto policy_index = static_cast<int64_t>(std::distance(this->params.policy_dof_indices.begin(), iter));
+                        dof_pos_rel[0][policy_index] = 0.0;
+                    }
+                }
             }
             obs_list.push_back(dof_pos_rel * this->params.dof_pos_scale);
         }
         else if (observation == "dof_vel")
         {
-            obs_list.push_back(this->obs.dof_vel * this->params.dof_vel_scale);
+            obs_list.push_back(SelectDofColumns(this->obs.dof_vel, this->params.policy_dof_indices) * this->params.dof_vel_scale);
         }
         else if (observation == "actions")
         {
@@ -141,6 +170,9 @@ torch::Tensor RL::ComputeObservation()
 
 void RL::InitObservations()
 {
+    const int action_dim = this->params.policy_dof_indices.empty()
+        ? this->params.num_of_dofs
+        : static_cast<int>(this->params.policy_dof_indices.size());
     this->obs.lin_vel = torch::tensor({{0.0, 0.0, 0.0}});
     this->obs.ang_vel = torch::tensor({{0.0, 0.0, 0.0}});
     this->obs.gravity_vec = torch::tensor({{0.0, 0.0, -1.0}});
@@ -148,7 +180,7 @@ void RL::InitObservations()
     this->obs.base_quat = torch::tensor({{0.0, 0.0, 0.0, 1.0}});
     this->obs.dof_pos = this->params.default_dof_pos;
     this->obs.dof_vel = torch::zeros({1, this->params.num_of_dofs});
-    this->obs.actions = torch::zeros({1, this->params.num_of_dofs});
+    this->obs.actions = torch::zeros({1, action_dim});
 }
 
 void RL::InitOutputs()
@@ -433,8 +465,18 @@ bool RL::PolicyDefaultDofPosMatchesCurrent(const std::string &target_config, dou
 void RL::ComputeOutput(const torch::Tensor &actions, torch::Tensor &output_dof_pos, torch::Tensor &output_dof_vel, torch::Tensor &output_dof_tau)
 {
     torch::Tensor actions_scaled = actions * this->params.action_scale;
+    if (!this->params.policy_dof_indices.empty())
+    {
+        torch::Tensor mapped_actions_scaled = torch::zeros_like(this->params.default_dof_pos);
+        for (size_t action_index = 0; action_index < this->params.policy_dof_indices.size(); ++action_index)
+        {
+            const int dof_index = this->params.policy_dof_indices[action_index];
+            mapped_actions_scaled[0][dof_index] = actions_scaled[0][static_cast<int64_t>(action_index)];
+        }
+        actions_scaled = mapped_actions_scaled;
+    }
     torch::Tensor pos_actions_scaled = actions_scaled.clone();
-    torch::Tensor vel_actions_scaled = torch::zeros_like(actions);
+    torch::Tensor vel_actions_scaled = torch::zeros_like(actions_scaled);
     for (int i : this->params.wheel_indices)
     {
         pos_actions_scaled[0][i] = 0.0;
@@ -799,6 +841,29 @@ void RL::ReadYamlRL(std::string robot_path)
     this->params.fixed_kd = torch::tensor(ReadVectorFromYaml<double>(config["fixed_kd"])).view({1, -1});
     this->params.torque_limits = torch::tensor(ReadVectorFromYaml<double>(config["torque_limits"])).view({1, -1});
     this->params.default_dof_pos = torch::tensor(ReadVectorFromYaml<double>(config["default_dof_pos"])).view({1, -1});
+    this->params.policy_dof_indices.clear();
+    if (config["policy_dof_indices"])
+    {
+        const std::vector<int> policy_dof_indices = ReadVectorFromYaml<int>(config["policy_dof_indices"]);
+        bool valid = !policy_dof_indices.empty();
+        for (int index : policy_dof_indices)
+        {
+            if (index < 0 || index >= this->params.num_of_dofs)
+            {
+                valid = false;
+                break;
+            }
+        }
+        if (valid)
+        {
+            this->params.policy_dof_indices = policy_dof_indices;
+        }
+        else
+        {
+            std::cout << LOGGER::WARNING << "Ignoring policy_dof_indices in " << config_path
+                      << ": expected non-empty indices within num_of_dofs." << std::endl;
+        }
+    }
     this->params.joint_mapping = ReadVectorFromYaml<int>(config["joint_mapping"]);
 }
 
