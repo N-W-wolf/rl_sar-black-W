@@ -31,6 +31,12 @@ double CommandLimit(const ModelParams &params, size_t index)
     return index < params.command_limits.size() ? params.command_limits[index] : default_limits[index];
 }
 
+double JoystickCommandLimit(const ModelParams &params, size_t index)
+{
+    static const double default_limits[] = {2.0, 1.0, 3.0};
+    return index < params.joystick_command_limits.size() ? params.joystick_command_limits[index] : default_limits[index];
+}
+
 std::string NormalizeDebugInput(std::string input)
 {
     input.erase(input.begin(), std::find_if(input.begin(), input.end(), [](unsigned char ch) { return !std::isspace(ch); }));
@@ -862,9 +868,12 @@ void RL_Sim::JoyCallback(
     if (rising(rb && dpad_left, previous_rb && previous_dpad_left)) this->control.SetGamepad(Input::Gamepad::RB_DPadLeft);
     if (rising(lb && rb, previous_lb && previous_rb)) this->control.SetGamepad(Input::Gamepad::LB_RB);
 
-    this->control.x = ApplyLimit(ApplyDeadband(axis(1) * 2, kLinearCommandDeadband), CommandLimit(this->params, 0)); // LY
-    this->control.y = ApplyLimit(ApplyDeadband(axis(0) * 1, kLinearCommandDeadband), CommandLimit(this->params, 1)); // LX
-    this->control.yaw = ApplyLimit(ApplyDeadband(axis(3) * 3.0, kYawCommandDeadband), CommandLimit(this->params, 2)); // RX
+    const double joy_x_limit = JoystickCommandLimit(this->params, 0);
+    const double joy_y_limit = JoystickCommandLimit(this->params, 1);
+    const double joy_yaw_limit = JoystickCommandLimit(this->params, 2);
+    this->control.x = ApplyLimit(ApplyDeadband(axis(1) * joy_x_limit, kLinearCommandDeadband), joy_x_limit); // LY
+    this->control.y = ApplyLimit(ApplyDeadband(axis(0) * joy_y_limit, kLinearCommandDeadband), joy_y_limit); // LX
+    this->control.yaw = ApplyLimit(ApplyDeadband(axis(3) * joy_yaw_limit, kYawCommandDeadband), joy_yaw_limit); // RX
 
     this->previous_joy_msg = this->joy_msg;
     this->has_previous_joy_msg = true;

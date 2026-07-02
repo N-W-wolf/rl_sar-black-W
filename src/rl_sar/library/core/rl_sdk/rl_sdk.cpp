@@ -673,6 +673,20 @@ void RL::ReadYamlBase(std::string robot_path)
                       << ": expected [x, y, yaw]. Using [2.0, 1.0, 3.0]." << std::endl;
         }
     }
+    this->params.joystick_command_limits = {2.0, 1.0, 3.0};
+    if (config["joystick_command_limits"])
+    {
+        const std::vector<double> joystick_command_limits = ReadVectorFromYaml<double>(config["joystick_command_limits"]);
+        if (joystick_command_limits.size() == 3)
+        {
+            this->params.joystick_command_limits = joystick_command_limits;
+        }
+        else
+        {
+            std::cout << LOGGER::WARNING << "Ignoring joystick_command_limits in " << config_path
+                      << ": expected [x, y, yaw]. Using [2.0, 1.0, 3.0]." << std::endl;
+        }
+    }
     this->params.joint_names = ReadVectorFromYaml<std::string>(config["joint_names"]);
     this->params.joint_controller_names = ReadVectorFromYaml<std::string>(config["joint_controller_names"]);
     this->params.joint_mapping = ReadVectorFromYaml<int>(config["joint_mapping"]);
