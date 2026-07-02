@@ -137,12 +137,38 @@ inline bool RequestNextPolicySwitch(RL &rl)
     return rl.RequestPolicySwitch(target_config);
 }
 
+inline YAML::Node LoadPolicyConfigNode(const RL &rl, const std::string &config_name)
+{
+    const std::string config_path = std::string(CMAKE_CURRENT_SOURCE_DIR) + "/policy/" + rl.robot_name + "/" + config_name + "/config.yaml";
+    YAML::Node root = YAML::LoadFile(config_path);
+    YAML::Node config = root[rl.robot_name + "/" + config_name];
+    if (!config)
+    {
+        throw std::runtime_error("missing policy config node: " + rl.robot_name + "/" + config_name);
+    }
+    return config;
+}
+
 inline std::string SelectPolicySwitchState(RL &rl)
 {
     std::string target_config;
     if (!rl.PeekPolicySwitchRequest(target_config))
     {
         return "";
+    }
+
+    try
+    {
+        const YAML::Node config = LoadPolicyConfigNode(rl, target_config);
+        if (config && config["force_policy_transition"] && config["force_policy_transition"].as<bool>())
+        {
+            return "RLFSMStatePolicyTransition";
+        }
+    }
+    catch (const std::exception &e)
+    {
+        std::cout << LOGGER::WARNING << "Failed to read policy switch options for '" << target_config
+                  << "': " << e.what() << std::endl;
     }
 
     if (rl.PolicyDefaultDofPosMatchesCurrent(target_config, kPolicyDefaultDofPosTolerance))
@@ -473,16 +499,24 @@ public:
 
     float transition_percent = 0.0f;
     bool transition_failed = false;
+    bool enter_getup_after_transition = false;
+    int transition_cycles = 1;
     std::string target_config;
     std::vector<double> start_pos;
+    std::vector<double> transition_kp;
+    std::vector<double> transition_kd;
     torch::Tensor target_dof_pos;
 
     void Enter() override
     {
         transition_percent = 0.0f;
         transition_failed = false;
+        enter_getup_after_transition = false;
+        transition_cycles = std::max(1, rl.policy_transition_cycles);
         target_config.clear();
         start_pos.clear();
+        transition_kp.clear();
+        transition_kd.clear();
         target_dof_pos = torch::Tensor();
         rl.rl_init_done = false;
         rl.ClearOutputQueues();
@@ -496,6 +530,25 @@ public:
 
         try
         {
+            const YAML::Node target_config_node = LoadPolicyConfigNode(rl, target_config);
+            if (target_config_node["policy_transition_cycles"])
+            {
+                transition_cycles = std::max(1, target_config_node["policy_transition_cycles"].as<int>());
+            }
+            if (target_config_node["enter_getup_after_transition"])
+            {
+                enter_getup_after_transition = target_config_node["enter_getup_after_transition"].as<bool>();
+            }
+            transition_kp = ReadBridgeVector(target_config_node["fixed_kp"]);
+            transition_kd = ReadBridgeVector(target_config_node["fixed_kd"]);
+            if (static_cast<int>(transition_kp.size()) != rl.params.num_of_dofs)
+            {
+                transition_kp.clear();
+            }
+            if (static_cast<int>(transition_kd.size()) != rl.params.num_of_dofs)
+            {
+                transition_kd.clear();
+            }
             target_dof_pos = rl.ReadPolicyDefaultDofPos(rl.robot_name + "/" + target_config);
             if (target_dof_pos.size(1) != rl.params.num_of_dofs)
             {
@@ -526,7 +579,7 @@ public:
             return;
         }
 
-        transition_percent += 1.0f / static_cast<float>(std::max(1, rl.policy_transition_cycles));
+        transition_percent += 1.0f / static_cast<float>(transition_cycles);
         transition_percent = std::min(transition_percent, 1.0f);
 
         for (int i = 0; i < rl.params.num_of_dofs; ++i)
@@ -534,8 +587,8 @@ public:
             const double target_pos = target_dof_pos[0][i].item<double>();
             fsm_command->motor_command.q[i] = (1 - transition_percent) * start_pos[i] + transition_percent * target_pos;
             fsm_command->motor_command.dq[i] = 0;
-            fsm_command->motor_command.kp[i] = rl.params.fixed_kp[0][i].item<double>();
-            fsm_command->motor_command.kd[i] = rl.params.fixed_kd[0][i].item<double>();
+            fsm_command->motor_command.kp[i] = transition_kp.empty() ? rl.params.fixed_kp[0][i].item<double>() : transition_kp[i];
+            fsm_command->motor_command.kd[i] = transition_kd.empty() ? rl.params.fixed_kd[0][i].item<double>() : transition_kd[i];
             fsm_command->motor_command.tau[i] = 0;
         }
         std::cout << "\r\033[K" << std::flush << LOGGER::INFO << "Policy posture switch " << std::fixed << std::setprecision(2) << transition_percent * 100.0f << "%" << std::flush;
@@ -552,6 +605,24 @@ public:
         if (transition_percent == 1.0f)
         {
             rl.config_name = target_config;
+            if (enter_getup_after_transition)
+            {
+                try
+                {
+                    std::lock_guard<std::mutex> lock(rl.model_mutex);
+                    rl.InitRL(rl.robot_name + "/" + rl.config_name);
+                    rl.ClearOutputQueues();
+                    rl.rl_init_done = false;
+                }
+                catch (const std::exception &e)
+                {
+                    std::cout << LOGGER::ERROR << "InitRL() failed after policy posture switch: " << e.what() << std::endl;
+                    transition_failed = true;
+                    rl.FinishPolicySwitch(false);
+                    return "RLFSMStateGetUp";
+                }
+                return "RLFSMStateGetUp";
+            }
             return "RLFSMStateRL_Locomotion";
         }
         return state_name_;

@@ -3,6 +3,9 @@
 
 blackW/black_locked_wheels:
   model_name: "best.pt"
+  force_policy_transition: true
+  policy_transition_cycles: 2000
+  enter_getup_after_transition: true
   num_observations: 45
   observations: ["commands","ang_vel", "gravity_vec", "dof_pos", "dof_vel", "actions"]
   observations_history: [0,1,2,3,4,5]  # 0 is the latest observation
