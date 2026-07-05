@@ -11,4 +11,4 @@ black:
   policy_config_cycle:
     - himloco_flat
     - himloco_obstacle
-    - himloco_down
+    #- himloco_down

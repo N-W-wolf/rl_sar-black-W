@@ -9,6 +9,8 @@ import tkinter.font as tkfont
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from robot_msgs.msg import RobotState
+from sensor_msgs.msg import Joy
 from std_msgs.msg import String
 
 
@@ -61,11 +63,15 @@ POLICY_PALETTE = [
     ("#047857", "#e1f6e9"),
 ]
 
+STATUS_PILLS = ("Pad", "Runner")
+HEARTBEAT_TIMEOUT_SEC = 0.75
+
 
 class StatusStore:
     def __init__(self):
         self.lock = threading.Lock()
         self.status = {}
+        self.health_states = {}
         self.updated_at = 0.0
 
     def update(self, message):
@@ -77,11 +83,16 @@ class StatusStore:
             self.status = status
             self.updated_at = time.time()
 
+    def update_health(self, health_states):
+        with self.lock:
+            self.health_states = dict(health_states)
+
     def snapshot(self):
         with self.lock:
             age = time.time() - self.updated_at if self.updated_at else None
             return {
                 "status": dict(self.status),
+                "health_states": dict(self.health_states),
                 "age": age,
                 "fresh": age is not None and age < 1.5,
             }
@@ -94,10 +105,36 @@ class RuntimeStatusNode(Node):
             automatically_declare_parameters_from_overrides=True,
         )
         self.store = store
+        self.joy_seen_at = 0.0
+        self.joy_connected = False
+        self.runner_seen_at = 0.0
         self.create_subscription(String, "/rl_sim/runtime_status", self.status_callback, 10)
+        self.create_subscription(Joy, "/joy", self.joy_callback, 10)
+        self.create_subscription(RobotState, "/_lowState/joint", self.runner_state_callback, 10)
+        self.create_timer(0.2, self.update_health_states)
+        self.update_health_states()
 
     def status_callback(self, msg):
         self.store.update(msg.data)
+
+    def joy_callback(self, msg):
+        self.joy_seen_at = time.time()
+        frame_id = str(msg.header.frame_id or "")
+        self.joy_connected = frame_id != "joy_disconnected"
+        self.update_health_states()
+
+    def runner_state_callback(self, _msg):
+        self.runner_seen_at = time.time()
+        self.update_health_states()
+
+    def update_health_states(self):
+        now = time.time()
+        joy_fresh = now - self.joy_seen_at < HEARTBEAT_TIMEOUT_SEC if self.joy_seen_at else False
+        runner_fresh = now - self.runner_seen_at < HEARTBEAT_TIMEOUT_SEC if self.runner_seen_at else False
+        self.store.update_health({
+            "Pad": joy_fresh and self.joy_connected,
+            "Runner": runner_fresh,
+        })
 
 
 class StatusWindow:
@@ -122,7 +159,7 @@ class StatusWindow:
         self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas.bind("<Configure>", lambda _event: self.draw())
 
-        self.snapshot = {"status": {}, "age": None, "fresh": False}
+        self.snapshot = {"status": {}, "health_states": {}, "age": None, "fresh": False}
         self.root.after(120, self.refresh)
 
     def run(self):
@@ -192,6 +229,7 @@ class StatusWindow:
         details_y2 = h - margin
 
         status = self.snapshot["status"]
+        health_states = self.snapshot.get("health_states", {})
         fresh = self.snapshot["fresh"]
         fsm_state = status.get("fsm_state", "")
         mode = MODE_NAMES.get(fsm_state, fsm_state or "Waiting for rl_sim")
@@ -219,6 +257,19 @@ class StatusWindow:
         dot_color = accent if fresh else COLORS["stale"]
         c.create_oval(pill_x1 + 13 * s, pill_y1 + 12 * s, pill_x1 + 22 * s, pill_y1 + 21 * s, fill=dot_color, outline=dot_color)
         c.create_text(pill_x1 + 30 * s, pill_y1 + pill_h / 2, anchor="w", text=pill_text, fill=COLORS["muted"], font=pill_font)
+
+        node_gap = 8 * s
+        node_x2 = pill_x1 - node_gap
+        for label in reversed(STATUS_PILLS):
+            online = bool(health_states.get(label, False))
+            node_text = label
+            node_w = max(74 * s, pill_font.measure(node_text) + 34 * s)
+            node_x1 = node_x2 - node_w
+            node_color = accent if online else COLORS["stale"]
+            self.draw_round_rect(node_x1, pill_y1, node_x2, pill_y1 + pill_h, pill_h / 2, COLORS["panel"], COLORS["line"], 1)
+            c.create_oval(node_x1 + 11 * s, pill_y1 + 13 * s, node_x1 + 20 * s, pill_y1 + 22 * s, fill=node_color, outline=node_color)
+            c.create_text(node_x1 + 27 * s, pill_y1 + pill_h / 2, anchor="w", text=node_text, fill=COLORS["muted"], font=pill_font)
+            node_x2 = node_x1 - node_gap
 
         c.create_rectangle(margin, mode_y1, w - margin, mode_y2, fill=accent_bg, outline=COLORS["line"], width=max(1, int(s)))
         c.create_rectangle(margin, mode_y1, margin + 12 * s, mode_y2, fill=accent, outline=accent)

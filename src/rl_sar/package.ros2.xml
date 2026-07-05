@@ -12,6 +12,7 @@
     <depend>rclcpp</depend>
     <depend>rclpy</depend>
     <depend>std_msgs</depend>
+    <depend>sensor_msgs</depend>
     <depend>gazebo_ros</depend>
     <depend>yaml-cpp</depend>
     <depend>robot_msgs</depend>
