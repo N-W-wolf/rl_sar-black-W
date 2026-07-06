@@ -146,46 +146,11 @@ RL_Sim::RL_Sim()
 #elif defined(USE_ROS2)
     this->ang_vel_type = "ang_vel_body";
     this->ros_namespace = this->get_namespace();
+    this->robot_name = this->declare_parameter<std::string>("robot_name", "black");
+    this->gazebo_model_name = this->declare_parameter<std::string>("gazebo_model_name", this->robot_name + "_gazebo");
     this->config_name = this->declare_parameter<std::string>("policy_config", "");
-    // get params from param_node
-    param_client = this->create_client<rcl_interfaces::srv::GetParameters>("/param_node/get_parameters");
-    while (!param_client->wait_for_service(std::chrono::seconds(1)))
-    {
-        if (!rclcpp::ok()) {
-            std::cout << LOGGER::ERROR << "Interrupted while waiting for param_node service. Exiting." << std::endl;
-            return;
-        }
-        std::cout << LOGGER::WARNING << "Waiting for param_node service to be available..." << std::endl;
-    }
-    auto request = std::make_shared<rcl_interfaces::srv::GetParameters::Request>();
-    request->names = {"robot_name", "gazebo_model_name", "policy_config"};
-    // Use a timeout for the future
-    auto future = param_client->async_send_request(request);
-    auto status = rclcpp::spin_until_future_complete(this->get_node_base_interface(), future, std::chrono::seconds(5));
-    if (status == rclcpp::FutureReturnCode::SUCCESS)
-    {
-        auto result = future.get();
-        if (result->values.size() < 2)
-        {
-            std::cout << LOGGER::ERROR << "Failed to get all parameters from param_node" << std::endl;
-        }
-        else
-        {
-            this->robot_name = result->values[0].string_value;
-            this->gazebo_model_name = result->values[1].string_value;
-            if (this->config_name.empty() && result->values.size() >= 3 &&
-                result->values[2].type == rcl_interfaces::msg::ParameterType::PARAMETER_STRING)
-            {
-                this->config_name = result->values[2].string_value;
-            }
-            std::cout << LOGGER::INFO << "Get param robot_name: " << this->robot_name << std::endl;
-            std::cout << LOGGER::INFO << "Get param gazebo_model_name: " << this->gazebo_model_name << std::endl;
-        }
-    }
-    else
-    {
-        std::cout << LOGGER::ERROR << "Failed to call param_node service" << std::endl;
-    }
+    std::cout << LOGGER::INFO << "Get param robot_name: " << this->robot_name << std::endl;
+    std::cout << LOGGER::INFO << "Get param gazebo_model_name: " << this->gazebo_model_name << std::endl;
 #endif
     if (!this->config_name.empty())
     {
@@ -268,7 +233,7 @@ RL_Sim::RL_Sim()
     //this->StartJointController(this->ros_namespace, this->params.joint_names);
     // publisher
     this->robot_command_publisher = this->create_publisher<robot_msgs::msg::RobotCommand>(
-        this->ros_namespace + "robot_joint_controller/command", rclcpp::SystemDefaultsQoS());
+        "/_lowCmd/command", rclcpp::SystemDefaultsQoS());
     this->policy_switch_done_publisher = this->create_publisher<std_msgs::msg::Bool>(
         "/rl_sim/policy_switch_done", rclcpp::QoS(1).transient_local().reliable());
     this->policy_switch_status_publisher = this->create_publisher<std_msgs::msg::String>(
@@ -297,10 +262,10 @@ RL_Sim::RL_Sim()
         [this] (const std_msgs::msg::String::SharedPtr msg) {this->PolicyConfigCallback(msg);}
     );
     this->gazebo_imu_subscriber = this->create_subscription<sensor_msgs::msg::Imu>(
-        "/imu", rclcpp::SystemDefaultsQoS(), [this] (const sensor_msgs::msg::Imu::SharedPtr msg) {this->GazeboImuCallback(msg);}
+        "/_lowState/imu", rclcpp::SensorDataQoS(), [this] (const sensor_msgs::msg::Imu::SharedPtr msg) {this->GazeboImuCallback(msg);}
     );
     this->robot_state_subscriber = this->create_subscription<robot_msgs::msg::RobotState>(
-        this->ros_namespace + "robot_joint_controller/state", rclcpp::SystemDefaultsQoS(),
+        "/_lowState/joint", rclcpp::SystemDefaultsQoS(),
         [this] (const robot_msgs::msg::RobotState::SharedPtr msg) {this->RobotStateCallback(msg);}
     );
 

@@ -1,16 +1,11 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, LogInfo, Shutdown
-from launch.substitutions import LaunchConfiguration, TextSubstitution, Command
+from launch.substitutions import LaunchConfiguration, TextSubstitution
 from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
 
 def generate_launch_description():
     rname = LaunchConfiguration("rname")
     policy_config = LaunchConfiguration("policy_config")
-
-    robot_name = ParameterValue(Command(["echo -n ", rname]), value_type=str)
-    gazebo_model_name = ParameterValue(Command(["echo -n ", rname, "_gazebo"]), value_type=str)
-    policy_config_value = ParameterValue(Command(["echo -n ", policy_config]), value_type=str)
 
     node=Node(
         package="rl_sar",
@@ -20,27 +15,9 @@ def generate_launch_description():
         emulate_tty=True,
         on_exit=Shutdown(),
         parameters=[{
-            "policy_config": policy_config_value,
+            "robot_name": rname,
+            "policy_config": policy_config,
         }],
-    )
-
-    param_node = Node(
-        package="demo_nodes_cpp",
-        executable="parameter_blackboard",
-        name="param_node",
-        on_exit=Shutdown(),
-        parameters=[{
-            "robot_name": robot_name,
-            "gazebo_model_name": gazebo_model_name,
-            "policy_config": policy_config_value,
-        }],
-    )
-
-    status_ui_node = Node(
-        package="rl_sar",
-        executable="rl_sim_status_ui.py",
-        name="rl_sim_status_ui",
-        output="screen",
     )
     
     # joy_node = Node(
@@ -64,8 +41,8 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             "rname",
-            description="Robot name (e.g., a1, go2)",
-            default_value=TextSubstitution(text=""),
+            description="Robot name (e.g., black, a1, go2)",
+            default_value=TextSubstitution(text="black"),
         ),
         DeclareLaunchArgument(
             "policy_config",
@@ -75,8 +52,5 @@ def generate_launch_description():
         LogInfo(msg="Use /rl_sim/debug_key for interactive debug input under ros2 launch."),
         LogInfo(msg="Example: ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String \"{data: '0'}\""),
         LogInfo(msg="Publish {data: 'shutdown'} to stop rl_sim and let launch cleanly exit all child processes."),
-        LogInfo(msg="Status UI window will open automatically."),
         node,
-        param_node,
-        status_ui_node,
     ])
