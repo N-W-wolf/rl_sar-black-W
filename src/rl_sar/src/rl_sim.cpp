@@ -146,9 +146,51 @@ RL_Sim::RL_Sim()
 #elif defined(USE_ROS2)
     this->ang_vel_type = "ang_vel_body";
     this->ros_namespace = this->get_namespace();
-    this->robot_name = this->declare_parameter<std::string>("robot_name", "black");
-    this->gazebo_model_name = this->declare_parameter<std::string>("gazebo_model_name", this->robot_name + "_gazebo");
+    this->robot_name = this->declare_parameter<std::string>("robot_name", "");
+    this->gazebo_model_name = this->declare_parameter<std::string>("gazebo_model_name", "");
     this->config_name = this->declare_parameter<std::string>("policy_config", "");
+
+    if (this->robot_name.empty())
+    {
+        param_client = this->create_client<rcl_interfaces::srv::GetParameters>("/param_node/get_parameters");
+        if (param_client->wait_for_service(std::chrono::milliseconds(500)))
+        {
+            auto request = std::make_shared<rcl_interfaces::srv::GetParameters::Request>();
+            request->names = {"robot_name", "gazebo_model_name", "policy_config"};
+            auto future = param_client->async_send_request(request);
+            auto status = rclcpp::spin_until_future_complete(
+                this->get_node_base_interface(), future, std::chrono::seconds(2));
+            if (status == rclcpp::FutureReturnCode::SUCCESS)
+            {
+                auto result = future.get();
+                if (result->values.size() >= 1 &&
+                    result->values[0].type == rcl_interfaces::msg::ParameterType::PARAMETER_STRING)
+                {
+                    this->robot_name = result->values[0].string_value;
+                }
+                if (this->gazebo_model_name.empty() && result->values.size() >= 2 &&
+                    result->values[1].type == rcl_interfaces::msg::ParameterType::PARAMETER_STRING)
+                {
+                    this->gazebo_model_name = result->values[1].string_value;
+                }
+                if (this->config_name.empty() && result->values.size() >= 3 &&
+                    result->values[2].type == rcl_interfaces::msg::ParameterType::PARAMETER_STRING)
+                {
+                    this->config_name = result->values[2].string_value;
+                }
+            }
+        }
+    }
+
+    if (this->robot_name.empty())
+    {
+        this->robot_name = "black";
+    }
+    if (this->gazebo_model_name.empty())
+    {
+        this->gazebo_model_name = this->robot_name + "_gazebo";
+    }
+
     std::cout << LOGGER::INFO << "Get param robot_name: " << this->robot_name << std::endl;
     std::cout << LOGGER::INFO << "Get param gazebo_model_name: " << this->gazebo_model_name << std::endl;
 #endif
