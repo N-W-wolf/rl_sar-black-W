@@ -47,4 +47,7 @@ UI_PID=$!
 
 echo "[INFO] Starting rl_sim in foreground. Keyboard input stays on this terminal."
 echo "[INFO] Press Ctrl-C to stop rl_sim and clean up parameter_blackboard."
-ros2 run rl_sar rl_sim --ros-args -p policy_config:="${POLICY_CONFIG}"
+ros2 run rl_sar rl_sim --ros-args \
+    -p robot_name:="${RNAME}" \
+    -p gazebo_model_name:="${RNAME}_gazebo" \
+    -p policy_config:="${POLICY_CONFIG}"
