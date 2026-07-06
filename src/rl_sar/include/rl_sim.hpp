@@ -19,6 +19,7 @@
 #include <csignal>
 #include <vector>
 #include <string>
+#include <chrono>
 #include <cstdlib>
 #include <unistd.h>
 #include <sys/wait.h>
@@ -136,6 +137,8 @@ private:
 
     // others
     bool has_previous_joy_msg = false;
+    bool has_joy_msg_time = false;
+    std::chrono::steady_clock::time_point last_joy_msg_time;
     std::string gazebo_model_name;
     int motiontime = 0;
     int runtime_status_publish_counter = 0;

@@ -13,6 +13,7 @@ namespace
 {
 constexpr double kLinearCommandDeadband = 0.2;
 constexpr double kYawCommandDeadband = 0.2;
+constexpr double kJoyCommandTimeoutSec = 0.3;
 
 double ApplyDeadband(double value, double deadband)
 {
@@ -776,7 +777,25 @@ void RL_Sim::JoyCallback(
 )
 {
     this->joy_msg = *msg;
+    this->last_joy_msg_time = std::chrono::steady_clock::now();
+    this->has_joy_msg_time = true;
     this->control.SetGamepad(Input::Gamepad::None);
+
+    const auto reset_joy_control = [this]()
+    {
+        this->control.x = 0.0;
+        this->control.y = 0.0;
+        this->control.yaw = 0.0;
+        this->previous_joy_msg = this->joy_msg;
+        this->has_previous_joy_msg = false;
+    };
+
+    if (this->joy_msg.header.frame_id == "joy_disconnected")
+    {
+        reset_joy_control();
+        return;
+    }
+
     // joystick control
     // Description of buttons and axes(F710):
     // |__ buttons[]: A=0, B=1, X=2, Y=3, LB=4, RB=5, back=6, start=7, power=8, stickL=9, stickR=10
@@ -901,6 +920,20 @@ void RL_Sim::RunModel()
         if (!this->rl_init_done)
         {
             return;
+        }
+        if (!this->control.navigation_mode)
+        {
+            const auto now = std::chrono::steady_clock::now();
+            const bool joy_timeout = !this->has_joy_msg_time ||
+                std::chrono::duration<double>(now - this->last_joy_msg_time).count() > kJoyCommandTimeoutSec;
+            if (joy_timeout)
+            {
+                this->control.x = 0.0;
+                this->control.y = 0.0;
+                this->control.yaw = 0.0;
+                this->control.SetGamepad(Input::Gamepad::None);
+                this->has_previous_joy_msg = false;
+            }
         }
         this->episode_length_buf += 1;
         //this->obs.lin_vel = torch::tensor({{this->vel.linear.x, this->vel.linear.y, this->vel.linear.z}});
