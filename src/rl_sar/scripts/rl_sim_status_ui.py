@@ -279,7 +279,7 @@ class StatusWindow:
 
         main_gap = 14 * s
         main_width = w - 2 * margin
-        speed_w = max(190 * s, min(260 * s, main_width * 0.28))
+        speed_w = max(210 * s, min(246 * s, main_width * 0.24))
         mode_x1 = margin
         mode_x2 = w - margin - speed_w - main_gap
         speed_x1 = mode_x2 + main_gap
@@ -301,16 +301,19 @@ class StatusWindow:
         c.create_rectangle(speed_x1, mode_y1, speed_x1 + 8 * s, mode_y2, fill=accent, outline=accent)
         c.create_text(speed_x1 + 22 * s, mode_y1 + 28 * s, anchor="nw", text="COMMAND", fill=COLORS["muted"], font=label_font)
 
-        speed_label_font = self.font(14 * s, "bold")
-        speed_value_font = self.adaptive_font("+0.00", speed_x2 - speed_x1 - 92 * s, 31 * s, 15 * s, "bold")
-        row1_y = mode_y1 + (mode_y2 - mode_y1) * 0.44
-        row2_y = mode_y1 + (mode_y2 - mode_y1) * 0.70
-        label_x = speed_x1 + 24 * s
-        value_x = speed_x2 - 22 * s
-        c.create_text(label_x, row1_y, anchor="w", text="X", fill=COLORS["muted"], font=speed_label_font)
-        c.create_text(value_x, row1_y, anchor="e", text=command_x, fill=COLORS["ink"], font=speed_value_font)
-        c.create_text(label_x, row2_y, anchor="w", text="YAW", fill=COLORS["muted"], font=speed_label_font)
-        c.create_text(value_x, row2_y, anchor="e", text=command_yaw, fill=COLORS["ink"], font=speed_value_font)
+        speed_label_font = self.font(13 * s, "bold")
+        speed_value_font = self.adaptive_font("+0.00", speed_x2 - speed_x1 - 54 * s, 32 * s, 16 * s, "bold")
+        speed_inner_x1 = speed_x1 + 22 * s
+        speed_inner_x2 = speed_x2 - 22 * s
+        speed_mid_y = mode_y1 + (mode_y2 - mode_y1) * 0.58
+        c.create_line(speed_inner_x1, speed_mid_y, speed_inner_x2, speed_mid_y, fill=COLORS["line"], width=max(1, int(s)))
+
+        def draw_speed_row(y1, y2, label, value):
+            c.create_text(speed_inner_x1, y1 + 17 * s, anchor="nw", text=label, fill=COLORS["muted"], font=speed_label_font)
+            c.create_text(speed_inner_x2, y2 - 13 * s, anchor="se", text=value, fill=COLORS["ink"], font=speed_value_font)
+
+        draw_speed_row(mode_y1 + 72 * s, speed_mid_y - 6 * s, "X", command_x)
+        draw_speed_row(speed_mid_y + 6 * s, mode_y2 - 16 * s, "YAW", command_yaw)
 
         robot = status.get("robot_name", "-")
         policy = status.get("policy_config", "-")
