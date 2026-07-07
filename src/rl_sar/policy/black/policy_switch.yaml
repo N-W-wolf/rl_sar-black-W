@@ -9,7 +9,7 @@ black:
   # This list defines both the allowed runtime switch targets and the
   # T/Y/toggle cycle order.
   policy_config_cycle:
-    - himloco
-    #- himloco_flat
-    #- himloco_obstacle
+    #- himloco
+    - himloco_flat
+    - himloco_obstacle
     #- himloco_down
