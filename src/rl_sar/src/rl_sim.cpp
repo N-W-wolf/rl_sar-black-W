@@ -553,6 +553,8 @@ void RL_Sim::PublishRuntimeStatus()
         "\"fsm_state\":\"" + JsonEscape(fsm_state) + "\","
         "\"policy_config\":\"" + JsonEscape(this->config_name) + "\","
         "\"model_name\":\"" + JsonEscape(this->params.model_name) + "\","
+        "\"command_x\":" + std::to_string(this->control.x) + ","
+        "\"command_yaw\":" + std::to_string(this->control.yaw) + ","
         "\"navigation_mode\":" + std::string(this->control.navigation_mode ? "true" : "false") +
         "}";
     this->runtime_status_publisher->publish(msg);

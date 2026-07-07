@@ -203,6 +203,12 @@ class StatusWindow:
         index = sum((i + 1) * ord(ch) for i, ch in enumerate(policy)) % len(POLICY_PALETTE)
         return POLICY_PALETTE[index]
 
+    def format_speed(self, value):
+        try:
+            return f"{float(value):+.2f}"
+        except (TypeError, ValueError):
+            return "-"
+
     def draw_round_rect(self, x1, y1, x2, y2, radius, fill, outline=None, width=1):
         radius = min(radius, (x2 - x1) / 2, (y2 - y1) / 2)
         points = [
@@ -271,14 +277,40 @@ class StatusWindow:
             c.create_text(node_x1 + 27 * s, pill_y1 + pill_h / 2, anchor="w", text=node_text, fill=COLORS["muted"], font=pill_font)
             node_x2 = node_x1 - node_gap
 
-        c.create_rectangle(margin, mode_y1, w - margin, mode_y2, fill=accent_bg, outline=COLORS["line"], width=max(1, int(s)))
-        c.create_rectangle(margin, mode_y1, margin + 12 * s, mode_y2, fill=accent, outline=accent)
-        c.create_text(margin + 34 * s, mode_y1 + 34 * s, anchor="nw", text="CURRENT MODE", fill=COLORS["muted"], font=label_font)
-        mode_max_width = w - 2 * margin - 70 * s
+        main_gap = 14 * s
+        main_width = w - 2 * margin
+        speed_w = max(190 * s, min(260 * s, main_width * 0.28))
+        mode_x1 = margin
+        mode_x2 = w - margin - speed_w - main_gap
+        speed_x1 = mode_x2 + main_gap
+        speed_x2 = w - margin
+
+        c.create_rectangle(mode_x1, mode_y1, mode_x2, mode_y2, fill=accent_bg, outline=COLORS["line"], width=max(1, int(s)))
+        c.create_rectangle(mode_x1, mode_y1, mode_x1 + 12 * s, mode_y2, fill=accent, outline=accent)
+        c.create_text(mode_x1 + 34 * s, mode_y1 + 34 * s, anchor="nw", text="CURRENT MODE", fill=COLORS["muted"], font=label_font)
+        mode_max_width = mode_x2 - mode_x1 - 70 * s
         mode_base_size = min(104 * s, max(30, (mode_y2 - mode_y1) * 0.30))
         mode_font = self.adaptive_font(mode, mode_max_width, mode_base_size, 30 * s, "bold")
         mode_text = self.fit_text(mode, mode_font, mode_max_width)
-        c.create_text(margin + 34 * s, (mode_y1 + mode_y2) / 2 + 18 * s, anchor="w", text=mode_text, fill=COLORS["ink"], font=mode_font)
+        c.create_text(mode_x1 + 34 * s, (mode_y1 + mode_y2) / 2 + 18 * s, anchor="w", text=mode_text, fill=COLORS["ink"], font=mode_font)
+
+        command_x = self.format_speed(status.get("command_x"))
+        command_yaw = self.format_speed(status.get("command_yaw"))
+        speed_bg = "#eef7f4" if fresh else COLORS["panel"]
+        self.draw_round_rect(speed_x1, mode_y1, speed_x2, mode_y2, 7 * s, speed_bg, COLORS["line"], 1)
+        c.create_rectangle(speed_x1, mode_y1, speed_x1 + 8 * s, mode_y2, fill=accent, outline=accent)
+        c.create_text(speed_x1 + 22 * s, mode_y1 + 28 * s, anchor="nw", text="COMMAND", fill=COLORS["muted"], font=label_font)
+
+        speed_label_font = self.font(14 * s, "bold")
+        speed_value_font = self.adaptive_font("+0.00", speed_x2 - speed_x1 - 92 * s, 31 * s, 15 * s, "bold")
+        row1_y = mode_y1 + (mode_y2 - mode_y1) * 0.44
+        row2_y = mode_y1 + (mode_y2 - mode_y1) * 0.70
+        label_x = speed_x1 + 24 * s
+        value_x = speed_x2 - 22 * s
+        c.create_text(label_x, row1_y, anchor="w", text="X", fill=COLORS["muted"], font=speed_label_font)
+        c.create_text(value_x, row1_y, anchor="e", text=command_x, fill=COLORS["ink"], font=speed_value_font)
+        c.create_text(label_x, row2_y, anchor="w", text="YAW", fill=COLORS["muted"], font=speed_label_font)
+        c.create_text(value_x, row2_y, anchor="e", text=command_yaw, fill=COLORS["ink"], font=speed_value_font)
 
         robot = status.get("robot_name", "-")
         policy = status.get("policy_config", "-")
