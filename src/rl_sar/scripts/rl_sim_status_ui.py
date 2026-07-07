@@ -18,6 +18,7 @@ MODE_NAMES = {
     "RLFSMStatePassive": "Passive",
     "RLFSMStateGetUp": "Get Up",
     "RLFSMStateGetDown": "Get Down",
+    "RLFSMStateRetry": "Retry",
     "RLFSMStateRL_Locomotion": "RL Locomotion",
     "RLFSMStatePolicyTransition": "Policy Switch",
     "RLFSMStatePolicyReload": "Policy Reload",
@@ -33,6 +34,7 @@ PALETTES = {
     "Passive": ("#4b5563", "#eef0f2"),
     "Get Up": ("#a16207", "#fff4cc"),
     "Get Down": ("#a16207", "#fff4cc"),
+    "Retry": ("#7f1d1d", "#fecaca"),
     "RL Locomotion": ("#277a46", "#dcefe3"),
     "Policy Switch": ("#c2410c", "#ffeadb"),
     "Policy Reload": ("#c2410c", "#ffeadb"),
@@ -65,6 +67,7 @@ POLICY_PALETTE = [
 
 STATUS_PILLS = ("Pad", "Runner")
 HEARTBEAT_TIMEOUT_SEC = 0.75
+UI_REFRESH_MS = 100
 
 
 class StatusStore:
@@ -172,7 +175,7 @@ class StatusWindow:
     def refresh(self):
         self.snapshot = self.store.snapshot()
         self.draw()
-        self.root.after(200, self.refresh)
+        self.root.after(UI_REFRESH_MS, self.refresh)
 
     def font(self, size, weight="normal"):
         return tkfont.Font(family="DejaVu Sans", size=max(7, int(size)), weight=weight)
@@ -239,6 +242,7 @@ class StatusWindow:
         fresh = self.snapshot["fresh"]
         fsm_state = status.get("fsm_state", "")
         mode = MODE_NAMES.get(fsm_state, fsm_state or "Waiting for rl_sim")
+        retry_mode = mode == "Retry"
         accent, accent_bg = PALETTES.get(mode, ("#277a46", "#dcefe3"))
 
         c.create_rectangle(0, 0, w, h, fill=COLORS["bg"], outline="")
@@ -285,18 +289,29 @@ class StatusWindow:
         speed_x1 = mode_x2 + main_gap
         speed_x2 = w - margin
 
-        c.create_rectangle(mode_x1, mode_y1, mode_x2, mode_y2, fill=accent_bg, outline=COLORS["line"], width=max(1, int(s)))
-        c.create_rectangle(mode_x1, mode_y1, mode_x1 + 12 * s, mode_y2, fill=accent, outline=accent)
-        c.create_text(mode_x1 + 34 * s, mode_y1 + 34 * s, anchor="nw", text="CURRENT MODE", fill=COLORS["muted"], font=label_font)
+        mode_bg = accent if retry_mode else accent_bg
+        mode_stripe = "#450a0a" if retry_mode else accent
+        mode_label_fill = "#fee2e2" if retry_mode else COLORS["muted"]
+        mode_text_fill = "#ffffff" if retry_mode else COLORS["ink"]
+        c.create_rectangle(mode_x1, mode_y1, mode_x2, mode_y2, fill=mode_bg, outline=COLORS["line"], width=max(1, int(s)))
+        c.create_rectangle(mode_x1, mode_y1, mode_x1 + 12 * s, mode_y2, fill=mode_stripe, outline=mode_stripe)
+        c.create_text(mode_x1 + 34 * s, mode_y1 + 34 * s, anchor="nw", text="CURRENT MODE", fill=mode_label_fill, font=label_font)
         mode_max_width = mode_x2 - mode_x1 - 70 * s
         mode_base_size = min(104 * s, max(30, (mode_y2 - mode_y1) * 0.30))
         mode_font = self.adaptive_font(mode, mode_max_width, mode_base_size, 30 * s, "bold")
         mode_text = self.fit_text(mode, mode_font, mode_max_width)
-        c.create_text(mode_x1 + 34 * s, (mode_y1 + mode_y2) / 2 + 18 * s, anchor="w", text=mode_text, fill=COLORS["ink"], font=mode_font)
+        c.create_text(mode_x1 + 34 * s, (mode_y1 + mode_y2) / 2 + 18 * s, anchor="w", text=mode_text, fill=mode_text_fill, font=mode_font)
+        if retry_mode:
+            lock_h = 42 * s
+            c.create_rectangle(mode_x1, mode_y2 - lock_h, mode_x2, mode_y2, fill="#450a0a", outline="#450a0a")
+            c.create_rectangle(mode_x1, mode_y2 - lock_h, mode_x1 + 12 * s, mode_y2, fill="#fef2f2", outline="#fef2f2")
+            lock_font = self.font(16 * s, "bold")
+            lock_text = self.fit_text("COMMANDS LOCKED - MANUAL CARRY", lock_font, mode_x2 - mode_x1 - 68 * s)
+            c.create_text(mode_x1 + 34 * s, mode_y2 - lock_h / 2, anchor="w", text=lock_text, fill="#ffffff", font=lock_font)
 
         command_x = self.format_speed(status.get("command_x"))
         command_yaw = self.format_speed(status.get("command_yaw"))
-        speed_bg = "#eef7f4" if fresh else COLORS["panel"]
+        speed_bg = "#fee2e2" if retry_mode else "#eef7f4" if fresh else COLORS["panel"]
         self.draw_round_rect(speed_x1, mode_y1, speed_x2, mode_y2, 7 * s, speed_bg, COLORS["line"], 1)
         c.create_rectangle(speed_x1, mode_y1, speed_x1 + 8 * s, mode_y2, fill=accent, outline=accent)
         c.create_text(speed_x1 + 22 * s, mode_y1 + 28 * s, anchor="nw", text="COMMAND", fill=COLORS["muted"], font=label_font)

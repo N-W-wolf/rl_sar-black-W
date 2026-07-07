@@ -14,6 +14,7 @@ namespace
 constexpr double kLinearCommandDeadband = 0.2;
 constexpr double kYawCommandDeadband = 0.2;
 constexpr double kJoyCommandTimeoutSec = 0.3;
+constexpr int kRuntimeStatusPublishCycles = 10;
 
 double ApplyDeadband(double value, double deadband)
 {
@@ -666,7 +667,7 @@ void RL_Sim::RobotControl()
         this->GetState(&this->robot_state);
         //std::cout<<"gyro: "<<this->robot_state.imu.gyroscope[0]<<", "<<this->robot_state.imu.gyroscope[1]<<", "<<this->robot_state.imu.gyroscope[2]<< std::endl;
         this->StateController(&this->robot_state, &this->robot_command);
-        if (++this->runtime_status_publish_counter >= 20)
+        if (++this->runtime_status_publish_counter >= kRuntimeStatusPublishCycles)
         {
             this->runtime_status_publish_counter = 0;
             this->PublishRuntimeStatus();

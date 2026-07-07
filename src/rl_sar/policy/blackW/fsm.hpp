@@ -126,6 +126,11 @@ inline BridgeDriveConfig ReadCarDriveConfig(const RL &rl)
     return ReadDriveConfig(rl, "car_drive.yaml", "car_default_dof_pos", "car drive");
 }
 
+inline BridgeDriveConfig ReadRetryConfig(const RL &rl)
+{
+    return ReadDriveConfig(rl, "retry_mode.yaml", "retry_default_dof_pos", "retry mode");
+}
+
 inline bool RequestNextPolicySwitch(RL &rl)
 {
     const std::string target_config = rl.GetNextPolicyConfig();
@@ -176,6 +181,53 @@ inline std::string SelectPolicySwitchState(RL &rl)
         return "RLFSMStatePolicyReload";
     }
     return "RLFSMStatePolicyTransition";
+}
+
+inline bool IsRetryCommand(const RL &rl)
+{
+    return rl.control.current_keyboard == Input::Keyboard::Num5 ||
+        rl.control.current_gamepad == Input::Gamepad::B;
+}
+
+inline bool IsGetDownCommand(const RL &rl)
+{
+    return rl.control.current_keyboard == Input::Keyboard::Num9 ||
+        rl.control.current_gamepad == Input::Gamepad::RB_B;
+}
+
+inline void ClearMotionCommand(RL &rl)
+{
+    rl.control.x = 0.0;
+    rl.control.y = 0.0;
+    rl.control.yaw = 0.0;
+}
+
+inline void ClearDiscreteCommand(RL &rl)
+{
+    rl.control.current_keyboard = rl.control.last_keyboard;
+    rl.control.current_gamepad = Input::Gamepad::None;
+}
+
+inline void ClearPendingPolicySwitch(RL &rl)
+{
+    bool cleared = false;
+    {
+        std::lock_guard<std::mutex> lock(rl.policy_switch_mutex);
+        if (!rl.policy_switch_in_progress &&
+            (rl.policy_switch_requested || !rl.pending_config_name.empty() || !rl.policy_switch_done))
+        {
+            rl.policy_switch_requested = false;
+            rl.pending_config_name.clear();
+            rl.policy_switch_done = true;
+            rl.policy_switch_success = true;
+            cleared = true;
+        }
+    }
+    if (cleared)
+    {
+        rl.PublishPolicySwitchDone(true);
+        rl.PublishPolicySwitchStatus("retry command locked");
+    }
 }
 
 class RLFSMStatePassive : public RLFSMState
@@ -305,7 +357,13 @@ public:
                 rl.control.current_gamepad = Input::Gamepad::None;
                 return "RLFSMStateCarDrive";
             }
-            else if (rl.control.current_keyboard == Input::Keyboard::Num9 || rl.control.current_gamepad == Input::Gamepad::B)
+            else if (IsRetryCommand(rl))
+            {
+                ClearMotionCommand(rl);
+                ClearDiscreteCommand(rl);
+                return "RLFSMStateRetry";
+            }
+            else if (IsGetDownCommand(rl))
             {
                 return "RLFSMStateGetDown";
             }
@@ -356,6 +414,111 @@ public:
         {
             return "RLFSMStateGetUp";
         }
+        return state_name_;
+    }
+};
+
+class RLFSMStateRetry : public RLFSMState
+{
+public:
+    RLFSMStateRetry(RL *rl) : RLFSMState(*rl, "RLFSMStateRetry") {}
+
+    BridgeDriveConfig retry_config;
+    float prepare_percent = 0.0f;
+    bool pose_ready = false;
+    std::vector<double> start_pos;
+
+    void Enter() override
+    {
+        retry_config = ReadRetryConfig(rl);
+        prepare_percent = 0.0f;
+        pose_ready = false;
+        start_pos.clear();
+        rl.rl_init_done = false;
+        rl.ClearOutputQueues();
+        ClearPendingPolicySwitch(rl);
+        ClearMotionCommand(rl);
+        rl.control.navigation_mode = false;
+        rl.now_state = *fsm_state;
+
+        start_pos.resize(rl.params.num_of_dofs);
+        for (int i = 0; i < rl.params.num_of_dofs; ++i)
+        {
+            start_pos[i] = rl.now_state.motor_state.q[i];
+        }
+
+        std::cout << LOGGER::WARNING
+                  << "Entered retry mode. Commands are locked for manual carry. "
+                  << "Press '0'/A to GetUp, or 'P'/LB+X to Passive."
+                  << std::endl;
+    }
+
+    void Run() override
+    {
+        ClearMotionCommand(rl);
+        ClearPendingPolicySwitch(rl);
+        rl.control.navigation_mode = false;
+        rl.now_state = *fsm_state;
+
+        if (!pose_ready)
+        {
+            prepare_percent += 1.0f / static_cast<float>(retry_config.prepare_cycles);
+            prepare_percent = std::min(prepare_percent, 1.0f);
+            if (prepare_percent == 1.0f)
+            {
+                pose_ready = true;
+                std::cout << std::endl << LOGGER::WARNING << "Retry pose ready." << std::endl;
+            }
+        }
+
+        for (int i = 0; i < rl.params.num_of_dofs; ++i)
+        {
+            if (IsWheelIndex(rl, i))
+            {
+                fsm_command->motor_command.q[i] = rl.now_state.motor_state.q[i];
+                fsm_command->motor_command.dq[i] = 0.0;
+                fsm_command->motor_command.kp[i] = 0.0;
+                fsm_command->motor_command.kd[i] = retry_config.kd[i];
+                fsm_command->motor_command.tau[i] = 0.0;
+            }
+            else
+            {
+                fsm_command->motor_command.q[i] = (1 - prepare_percent) * start_pos[i] + prepare_percent * retry_config.dof_pos[i];
+                fsm_command->motor_command.dq[i] = 0.0;
+                fsm_command->motor_command.kp[i] = retry_config.kp[i];
+                fsm_command->motor_command.kd[i] = retry_config.kd[i];
+                fsm_command->motor_command.tau[i] = 0.0;
+            }
+        }
+
+        std::cout << "\r\033[K" << std::flush << LOGGER::WARNING
+                  << "Retry mode: command locked, manual carry allowed"
+                  << (pose_ready ? " ready" : " prepare ")
+                  << std::fixed << std::setprecision(2) << prepare_percent * 100.0f << "%"
+                  << std::flush;
+    }
+
+    void Exit() override
+    {
+        ClearMotionCommand(rl);
+        ClearPendingPolicySwitch(rl);
+    }
+
+    std::string CheckChange() override
+    {
+        if (rl.control.current_keyboard == Input::Keyboard::P || rl.control.current_gamepad == Input::Gamepad::LB_X)
+        {
+            ClearMotionCommand(rl);
+            ClearDiscreteCommand(rl);
+            return "RLFSMStatePassive";
+        }
+        if (rl.control.current_keyboard == Input::Keyboard::Num0 || rl.control.current_gamepad == Input::Gamepad::A)
+        {
+            ClearMotionCommand(rl);
+            ClearDiscreteCommand(rl);
+            return "RLFSMStateGetUp";
+        }
+        ClearDiscreteCommand(rl);
         return state_name_;
     }
 };
@@ -436,7 +599,13 @@ public:
         {
             return "RLFSMStatePassive";
         }
-        else if (rl.control.current_keyboard == Input::Keyboard::Num9 || rl.control.current_gamepad == Input::Gamepad::B)
+        else if (IsRetryCommand(rl))
+        {
+            ClearMotionCommand(rl);
+            ClearDiscreteCommand(rl);
+            return "RLFSMStateRetry";
+        }
+        else if (IsGetDownCommand(rl))
         {
             return "RLFSMStateGetDown";
         }
@@ -758,7 +927,13 @@ public:
             rl.control.yaw = 0.0;
             return "RLFSMStatePassive";
         }
-        else if (rl.control.current_keyboard == Input::Keyboard::Num9 || rl.control.current_gamepad == Input::Gamepad::B)
+        else if (IsRetryCommand(rl))
+        {
+            ClearMotionCommand(rl);
+            ClearDiscreteCommand(rl);
+            return "RLFSMStateRetry";
+        }
+        else if (IsGetDownCommand(rl))
         {
             rl.control.x = 0.0;
             rl.control.y = 0.0;
@@ -893,7 +1068,13 @@ public:
         {
             return "RLFSMStatePassive";
         }
-        else if (rl.control.current_keyboard == Input::Keyboard::Num9 || rl.control.current_gamepad == Input::Gamepad::B)
+        else if (IsRetryCommand(rl))
+        {
+            ClearMotionCommand(rl);
+            ClearDiscreteCommand(rl);
+            return "RLFSMStateRetry";
+        }
+        else if (IsGetDownCommand(rl))
         {
             return "RLFSMStateGetDown";
         }
@@ -999,7 +1180,13 @@ public:
             rl.control.yaw = 0.0;
             return "RLFSMStatePassive";
         }
-        else if (rl.control.current_keyboard == Input::Keyboard::Num9 || rl.control.current_gamepad == Input::Gamepad::B)
+        else if (IsRetryCommand(rl))
+        {
+            ClearMotionCommand(rl);
+            ClearDiscreteCommand(rl);
+            return "RLFSMStateRetry";
+        }
+        else if (IsGetDownCommand(rl))
         {
             rl.control.x = 0.0;
             rl.control.y = 0.0;
@@ -1134,7 +1321,13 @@ public:
         {
             return "RLFSMStatePassive";
         }
-        else if (rl.control.current_keyboard == Input::Keyboard::Num9 || rl.control.current_gamepad == Input::Gamepad::B)
+        else if (IsRetryCommand(rl))
+        {
+            ClearMotionCommand(rl);
+            ClearDiscreteCommand(rl);
+            return "RLFSMStateRetry";
+        }
+        else if (IsGetDownCommand(rl))
         {
             return "RLFSMStateGetDown";
         }
@@ -1240,7 +1433,13 @@ public:
             rl.control.yaw = 0.0;
             return "RLFSMStatePassive";
         }
-        else if (rl.control.current_keyboard == Input::Keyboard::Num9 || rl.control.current_gamepad == Input::Gamepad::B)
+        else if (IsRetryCommand(rl))
+        {
+            ClearMotionCommand(rl);
+            ClearDiscreteCommand(rl);
+            return "RLFSMStateRetry";
+        }
+        else if (IsGetDownCommand(rl))
         {
             rl.control.x = 0.0;
             rl.control.y = 0.0;
@@ -1375,7 +1574,13 @@ public:
         {
             return "RLFSMStatePassive";
         }
-        else if (rl.control.current_keyboard == Input::Keyboard::Num9 || rl.control.current_gamepad == Input::Gamepad::B)
+        else if (IsRetryCommand(rl))
+        {
+            ClearMotionCommand(rl);
+            ClearDiscreteCommand(rl);
+            return "RLFSMStateRetry";
+        }
+        else if (IsGetDownCommand(rl))
         {
             return "RLFSMStateGetDown";
         }
@@ -1406,6 +1611,8 @@ public:
             return std::make_shared<blackw_fsm::RLFSMStateGetUp>(rl);
         else if (state_name == "RLFSMStateGetDown")
             return std::make_shared<blackw_fsm::RLFSMStateGetDown>(rl);
+        else if (state_name == "RLFSMStateRetry")
+            return std::make_shared<blackw_fsm::RLFSMStateRetry>(rl);
         else if (state_name == "RLFSMStateRL_Locomotion")
             return std::make_shared<blackw_fsm::RLFSMStateRL_Locomotion>(rl);
         else if (state_name == "RLFSMStatePolicyTransition")
@@ -1433,6 +1640,7 @@ public:
             "RLFSMStatePassive",
             "RLFSMStateGetUp",
             "RLFSMStateGetDown",
+            "RLFSMStateRetry",
             "RLFSMStateRL_Locomotion",
             "RLFSMStatePolicyTransition",
             "RLFSMStatePolicyReload",

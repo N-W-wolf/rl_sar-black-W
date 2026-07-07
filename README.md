@@ -216,6 +216,7 @@ ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: 'shutdown'}"
 | `0` | 从当前初始姿态切到 `GetUp` |
 | `9` | 回到初始姿态 |
 | `1` | 基础 locomotion |
+| `5` | `blackW` 下进入重试搬运模式 |
 | `P` | 电机 passive 模式 |
 | `R` | 重置仿真 |
 | `Enter` | 暂停/继续仿真 |
@@ -236,7 +237,8 @@ ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: 'shutdown'}"
 | 手柄 | 作用 |
 |---|---|
 | `A` | 从当前初始姿态切到 `GetUp` |
-| `B` | 回到初始姿态 |
+| `B` | `blackW` 下进入重试搬运模式 |
+| `RB + B` | `blackW` 下回到初始姿态 |
 | `RB + DPadUp` | 基础 locomotion |
 | `LB + X` | 电机 passive 模式 |
 | `RB + Y` | 重置仿真 |
@@ -310,19 +312,32 @@ ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: '3'}"
 ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: '4'}"
 ```
 
+`blackW` 重试搬运模式用于越障失败后人工搬运机器人。进入后不会运行 RL 模型，会清零速度命令、关闭导航模式并忽略模式切换请求，只保持配置姿态。进入方式：
+
+```bash
+# 键盘 5 或手柄 B
+ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: '5'}"
+```
+
+退出方式：
+
+- `0` 或 `A`：回到 `GetUp`。
+- `P` 或 `LB + X`：进入 passive。
+
 退出方式由上层或人工触发：
 
 - `1` 或 `RB + DPadUp`：先过渡到当前选中 RL 策略的 `default_dof_pos`，再进入 RL locomotion。
 - `2` 或 `RB + DPadRight`：进入桥模式。
 - `3` 或 `RB + DPadDown`：进入限高杆模式。
 - `4` 或 `RB + DPadLeft`：进入固定姿态车模式。
+- `5` 或 `B`：进入重试搬运模式。
 - `0` 或 `A`：回到 `GetUp`。
-- `9` 或 `B`：回到 `GetDown`。
+- `9` 或 `RB + B`：回到 `GetDown`。
 - `P` 或 `LB + X`：进入 passive。
 
 桥模式、限高杆模式和固定姿态车模式之间互相切换时不会主动清零 `x/yaw`，姿态插值过程中轮子会继续按当前命令行驶。切回 RL、`GetUp`、`GetDown` 或 passive 时会清零速度命令。
 
-桥模式参数位于 [bridge_drive.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/bridge_drive.yaml)，限高杆模式参数位于 [low_bar_drive.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/low_bar_drive.yaml)，固定姿态车模式参数位于 [car_drive.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/car_drive.yaml)。主要配置包括固定姿态、进入姿态的 `prepare_cycles`、回到 RL 默认姿态的 `exit_to_rl_cycles`、腿部 `kp/kd`、轮速限制和轮速方向 `wheel_velocity_sign`。首次实测前建议先悬空确认轮速方向，再低速上地调试。
+桥模式参数位于 [bridge_drive.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/bridge_drive.yaml)，限高杆模式参数位于 [low_bar_drive.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/low_bar_drive.yaml)，固定姿态车模式参数位于 [car_drive.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/car_drive.yaml)，重试搬运模式参数位于 [retry_mode.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/retry_mode.yaml)。固定姿态车类模式主要配置包括固定姿态、进入姿态的 `prepare_cycles`、回到 RL 默认姿态的 `exit_to_rl_cycles`、腿部 `kp/kd`、轮速限制和轮速方向 `wheel_velocity_sign`；重试搬运模式主要配置包括 `retry_default_dof_pos`、进入姿态的 `prepare_cycles` 和 `kp/kd`。首次实测前建议先悬空确认轮速方向，再低速上地调试。
 
 ### 新增可切换模型
 
