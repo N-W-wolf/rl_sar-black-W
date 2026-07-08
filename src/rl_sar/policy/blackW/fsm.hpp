@@ -274,11 +274,23 @@ class RLFSMStateGetUp : public RLFSMState
 public:
     RLFSMStateGetUp(RL *rl) : RLFSMState(*rl, "RLFSMStateGetUp") {}
 
+    bool start_state_recorded = false;
+    std::vector<double> start_pos;
+
     void Enter() override
     {
         rl.running_percent = 0.0f;
         rl.now_state = *fsm_state;
-        rl.start_state = rl.now_state;
+        if (!start_state_recorded)
+        {
+            rl.start_state = rl.now_state;
+            start_state_recorded = true;
+        }
+        start_pos.resize(rl.params.num_of_dofs);
+        for (int i = 0; i < rl.params.num_of_dofs; ++i)
+        {
+            start_pos[i] = rl.now_state.motor_state.q[i];
+        }
     }
 
     void Run() override
@@ -293,7 +305,7 @@ public:
 
             for (int i = 0; i < rl.params.num_of_dofs; ++i)
             {
-                fsm_command->motor_command.q[i] = (1 - rl.running_percent) * rl.start_state.motor_state.q[i] + rl.running_percent * rl.params.default_dof_pos[0][i].item<double>();
+                fsm_command->motor_command.q[i] = (1 - rl.running_percent) * start_pos[i] + rl.running_percent * rl.params.default_dof_pos[0][i].item<double>();
                 fsm_command->motor_command.dq[i] = 0;
                 fsm_command->motor_command.kp[i] = rl.params.fixed_kp[0][i].item<double>();
                 fsm_command->motor_command.kd[i] = rl.params.fixed_kd[0][i].item<double>();

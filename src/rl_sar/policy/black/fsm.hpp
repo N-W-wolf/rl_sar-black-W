@@ -220,13 +220,18 @@ public:
         0.00, -1.4,  2.2
     };
     bool skip_pre_stage = false;
+    bool start_state_recorded = false;
     std::vector<double> start_pos;
 
     void Enter() override
     {
         rl.running_percent = 0.0f;
         rl.now_state = *fsm_state;
-        rl.start_state = rl.now_state;
+        if (!start_state_recorded)
+        {
+            rl.start_state = rl.now_state;
+            start_state_recorded = true;
+        }
         skip_pre_stage = CurrentPoseMatchesDefault(rl, rl.now_state, kGetUpDefaultPoseTolerance);
         pre_running_percent = skip_pre_stage ? 1.0f : 0.0f;
         start_pos.resize(rl.params.num_of_dofs);
