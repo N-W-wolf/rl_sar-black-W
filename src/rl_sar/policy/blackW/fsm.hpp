@@ -195,6 +195,62 @@ inline bool IsGetDownCommand(const RL &rl)
         rl.control.current_gamepad == Input::Gamepad::RB_B;
 }
 
+inline bool IsRLModeCommand(const RL &rl)
+{
+    return rl.control.current_keyboard == Input::Keyboard::Num1 ||
+        rl.control.current_gamepad == Input::Gamepad::RB_DPadUp;
+}
+
+inline bool IsBridgeModeCommand(const RL &rl)
+{
+    return rl.control.current_keyboard == Input::Keyboard::Num2 ||
+        rl.control.current_gamepad == Input::Gamepad::RB_DPadRight;
+}
+
+inline bool IsLowBarModeCommand(const RL &rl)
+{
+    return rl.control.current_keyboard == Input::Keyboard::Num3 ||
+        rl.control.current_gamepad == Input::Gamepad::RB_DPadDown;
+}
+
+inline bool IsCarModeCommand(const RL &rl)
+{
+    return rl.control.current_keyboard == Input::Keyboard::Num4 ||
+        rl.control.current_gamepad == Input::Gamepad::RB_DPadLeft;
+}
+
+inline bool RememberDriveModeCommand(RL &rl)
+{
+    Input::Keyboard target = Input::Keyboard::None;
+    if (IsRLModeCommand(rl))
+    {
+        target = Input::Keyboard::Num1;
+    }
+    else if (IsBridgeModeCommand(rl))
+    {
+        target = Input::Keyboard::Num2;
+    }
+    else if (IsLowBarModeCommand(rl))
+    {
+        target = Input::Keyboard::Num3;
+    }
+    else if (IsCarModeCommand(rl))
+    {
+        target = Input::Keyboard::Num4;
+    }
+
+    if (target == Input::Keyboard::None)
+    {
+        return false;
+    }
+
+    rl.control.current_keyboard = target;
+    rl.control.last_keyboard = Input::Keyboard::None;
+    rl.control.current_gamepad = Input::Gamepad::None;
+    rl.control.last_gamepad = Input::Gamepad::None;
+    return true;
+}
+
 inline void ClearMotionCommand(RL &rl)
 {
     rl.control.x = 0.0;
@@ -204,8 +260,39 @@ inline void ClearMotionCommand(RL &rl)
 
 inline void ClearDiscreteCommand(RL &rl)
 {
-    rl.control.current_keyboard = rl.control.last_keyboard;
+    rl.control.current_keyboard = Input::Keyboard::None;
+    rl.control.last_keyboard = Input::Keyboard::None;
     rl.control.current_gamepad = Input::Gamepad::None;
+    rl.control.last_gamepad = Input::Gamepad::None;
+}
+
+inline std::string ConsumeDriveModeCommandState(RL &rl)
+{
+    if (!RememberDriveModeCommand(rl))
+    {
+        return "";
+    }
+
+    std::string state;
+    if (IsRLModeCommand(rl))
+    {
+        state = "RLFSMStateRL_Locomotion";
+    }
+    else if (IsBridgeModeCommand(rl))
+    {
+        state = "RLFSMStateBridgeDrive";
+    }
+    else if (IsLowBarModeCommand(rl))
+    {
+        state = "RLFSMStateLowBarDrive";
+    }
+    else if (IsCarModeCommand(rl))
+    {
+        state = "RLFSMStateCarDrive";
+    }
+
+    ClearDiscreteCommand(rl);
+    return state;
 }
 
 inline void ClearPendingPolicySwitch(RL &rl)
@@ -261,8 +348,13 @@ public:
 
     std::string CheckChange() override
     {
+        if (RememberDriveModeCommand(rl))
+        {
+            return "RLFSMStateGetUp";
+        }
         if (rl.control.current_keyboard == Input::Keyboard::Num0 || rl.control.current_gamepad == Input::Gamepad::A)
         {
+            ClearDiscreteCommand(rl);
             return "RLFSMStateGetUp";
         }
         return state_name_;
@@ -321,6 +413,7 @@ public:
     {
         if (rl.control.current_keyboard == Input::Keyboard::P || rl.control.current_gamepad == Input::Gamepad::LB_X)
         {
+            ClearDiscreteCommand(rl);
             return "RLFSMStatePassive";
         }
         if (rl.running_percent == 1.0f)
@@ -328,8 +421,7 @@ public:
             if (rl.control.current_keyboard == Input::Keyboard::T || rl.control.current_gamepad == Input::Gamepad::Y)
             {
                 const bool accepted = RequestNextPolicySwitch(rl);
-                rl.control.current_keyboard = rl.control.last_keyboard;
-                rl.control.current_gamepad = Input::Gamepad::None;
+                ClearDiscreteCommand(rl);
                 if (accepted)
                 {
                     const std::string switch_state = SelectPolicySwitchState(rl);
@@ -347,26 +439,24 @@ public:
                     return switch_state;
                 }
             }
-            else if (rl.control.current_keyboard == Input::Keyboard::Num1 || rl.control.current_gamepad == Input::Gamepad::RB_DPadUp)
+            else if (IsRLModeCommand(rl))
             {
+                ClearDiscreteCommand(rl);
                 return "RLFSMStateRL_Locomotion";
             }
-            else if (rl.control.current_keyboard == Input::Keyboard::Num2 || rl.control.current_gamepad == Input::Gamepad::RB_DPadRight)
+            else if (IsBridgeModeCommand(rl))
             {
-                rl.control.current_keyboard = rl.control.last_keyboard;
-                rl.control.current_gamepad = Input::Gamepad::None;
+                ClearDiscreteCommand(rl);
                 return "RLFSMStateBridgeDrive";
             }
-            else if (rl.control.current_keyboard == Input::Keyboard::Num3 || rl.control.current_gamepad == Input::Gamepad::RB_DPadDown)
+            else if (IsLowBarModeCommand(rl))
             {
-                rl.control.current_keyboard = rl.control.last_keyboard;
-                rl.control.current_gamepad = Input::Gamepad::None;
+                ClearDiscreteCommand(rl);
                 return "RLFSMStateLowBarDrive";
             }
-            else if (rl.control.current_keyboard == Input::Keyboard::Num4 || rl.control.current_gamepad == Input::Gamepad::RB_DPadLeft)
+            else if (IsCarModeCommand(rl))
             {
-                rl.control.current_keyboard = rl.control.last_keyboard;
-                rl.control.current_gamepad = Input::Gamepad::None;
+                ClearDiscreteCommand(rl);
                 return "RLFSMStateCarDrive";
             }
             else if (IsRetryCommand(rl))
@@ -377,6 +467,7 @@ public:
             }
             else if (IsGetDownCommand(rl))
             {
+                ClearDiscreteCommand(rl);
                 return "RLFSMStateGetDown";
             }
         }
@@ -418,12 +509,23 @@ public:
 
     std::string CheckChange() override
     {
-        if (rl.control.current_keyboard == Input::Keyboard::P || rl.control.current_gamepad == Input::Gamepad::LB_X || rl.running_percent == 1.0f)
+        if (rl.control.current_keyboard == Input::Keyboard::P || rl.control.current_gamepad == Input::Gamepad::LB_X)
         {
+            ClearDiscreteCommand(rl);
+            return "RLFSMStatePassive";
+        }
+        if (RememberDriveModeCommand(rl))
+        {
+            return "RLFSMStateGetUp";
+        }
+        if (rl.running_percent == 1.0f)
+        {
+            ClearDiscreteCommand(rl);
             return "RLFSMStatePassive";
         }
         else if (rl.control.current_keyboard == Input::Keyboard::Num0 || rl.control.current_gamepad == Input::Gamepad::A)
         {
+            ClearDiscreteCommand(rl);
             return "RLFSMStateGetUp";
         }
         return state_name_;
@@ -609,6 +711,7 @@ public:
     {
         if (rl.control.current_keyboard == Input::Keyboard::P || rl.control.current_gamepad == Input::Gamepad::LB_X)
         {
+            ClearDiscreteCommand(rl);
             return "RLFSMStatePassive";
         }
         else if (IsRetryCommand(rl))
@@ -619,17 +722,18 @@ public:
         }
         else if (IsGetDownCommand(rl))
         {
+            ClearDiscreteCommand(rl);
             return "RLFSMStateGetDown";
         }
         else if (rl.control.current_keyboard == Input::Keyboard::Num0 || rl.control.current_gamepad == Input::Gamepad::A)
         {
+            ClearDiscreteCommand(rl);
             return "RLFSMStateGetUp";
         }
         else if (rl.control.current_keyboard == Input::Keyboard::T || rl.control.current_gamepad == Input::Gamepad::Y)
         {
             const bool accepted = RequestNextPolicySwitch(rl);
-            rl.control.current_keyboard = rl.control.last_keyboard;
-            rl.control.current_gamepad = Input::Gamepad::None;
+            ClearDiscreteCommand(rl);
             if (accepted)
             {
                 const std::string switch_state = SelectPolicySwitchState(rl);
@@ -647,26 +751,24 @@ public:
                 return switch_state;
             }
         }
-        else if (rl.control.current_keyboard == Input::Keyboard::Num1 || rl.control.current_gamepad == Input::Gamepad::RB_DPadUp)
+        else if (IsRLModeCommand(rl))
         {
-            return "RLFSMStateRL_Locomotion";
+            ClearDiscreteCommand(rl);
+            return state_name_;
         }
-        else if (rl.control.current_keyboard == Input::Keyboard::Num2 || rl.control.current_gamepad == Input::Gamepad::RB_DPadRight)
+        else if (IsBridgeModeCommand(rl))
         {
-            rl.control.current_keyboard = rl.control.last_keyboard;
-            rl.control.current_gamepad = Input::Gamepad::None;
+            ClearDiscreteCommand(rl);
             return "RLFSMStateBridgeDrive";
         }
-        else if (rl.control.current_keyboard == Input::Keyboard::Num3 || rl.control.current_gamepad == Input::Gamepad::RB_DPadDown)
+        else if (IsLowBarModeCommand(rl))
         {
-            rl.control.current_keyboard = rl.control.last_keyboard;
-            rl.control.current_gamepad = Input::Gamepad::None;
+            ClearDiscreteCommand(rl);
             return "RLFSMStateLowBarDrive";
         }
-        else if (rl.control.current_keyboard == Input::Keyboard::Num4 || rl.control.current_gamepad == Input::Gamepad::RB_DPadLeft)
+        else if (IsCarModeCommand(rl))
         {
-            rl.control.current_keyboard = rl.control.last_keyboard;
-            rl.control.current_gamepad = Input::Gamepad::None;
+            ClearDiscreteCommand(rl);
             return "RLFSMStateCarDrive";
         }
         return state_name_;
@@ -937,6 +1039,7 @@ public:
             rl.control.x = 0.0;
             rl.control.y = 0.0;
             rl.control.yaw = 0.0;
+            ClearDiscreteCommand(rl);
             return "RLFSMStatePassive";
         }
         else if (IsRetryCommand(rl))
@@ -950,6 +1053,7 @@ public:
             rl.control.x = 0.0;
             rl.control.y = 0.0;
             rl.control.yaw = 0.0;
+            ClearDiscreteCommand(rl);
             return "RLFSMStateGetDown";
         }
         else if (rl.control.current_keyboard == Input::Keyboard::Num0 || rl.control.current_gamepad == Input::Gamepad::A)
@@ -957,27 +1061,30 @@ public:
             rl.control.x = 0.0;
             rl.control.y = 0.0;
             rl.control.yaw = 0.0;
+            ClearDiscreteCommand(rl);
             return "RLFSMStateGetUp";
         }
-        else if (rl.control.current_keyboard == Input::Keyboard::Num1 || rl.control.current_gamepad == Input::Gamepad::RB_DPadUp)
+        else if (IsRLModeCommand(rl))
         {
             rl.control.x = 0.0;
             rl.control.y = 0.0;
             rl.control.yaw = 0.0;
-            rl.control.current_keyboard = rl.control.last_keyboard;
-            rl.control.current_gamepad = Input::Gamepad::None;
+            ClearDiscreteCommand(rl);
             return "RLFSMStateBridgeToRLTransition";
         }
-        else if (rl.control.current_keyboard == Input::Keyboard::Num3 || rl.control.current_gamepad == Input::Gamepad::RB_DPadDown)
+        else if (IsBridgeModeCommand(rl))
         {
-            rl.control.current_keyboard = rl.control.last_keyboard;
-            rl.control.current_gamepad = Input::Gamepad::None;
+            ClearDiscreteCommand(rl);
+            return state_name_;
+        }
+        else if (IsLowBarModeCommand(rl))
+        {
+            ClearDiscreteCommand(rl);
             return "RLFSMStateLowBarDrive";
         }
-        else if (rl.control.current_keyboard == Input::Keyboard::Num4 || rl.control.current_gamepad == Input::Gamepad::RB_DPadLeft)
+        else if (IsCarModeCommand(rl))
         {
-            rl.control.current_keyboard = rl.control.last_keyboard;
-            rl.control.current_gamepad = Input::Gamepad::None;
+            ClearDiscreteCommand(rl);
             return "RLFSMStateCarDrive";
         }
         return state_name_;
@@ -1078,6 +1185,7 @@ public:
     {
         if (rl.control.current_keyboard == Input::Keyboard::P || rl.control.current_gamepad == Input::Gamepad::LB_X)
         {
+            ClearDiscreteCommand(rl);
             return "RLFSMStatePassive";
         }
         else if (IsRetryCommand(rl))
@@ -1088,13 +1196,20 @@ public:
         }
         else if (IsGetDownCommand(rl))
         {
+            ClearDiscreteCommand(rl);
             return "RLFSMStateGetDown";
         }
         else if (rl.control.current_keyboard == Input::Keyboard::Num0 || rl.control.current_gamepad == Input::Gamepad::A || transition_failed)
         {
+            ClearDiscreteCommand(rl);
             return "RLFSMStateGetUp";
         }
-        else if (transition_percent == 1.0f)
+        const std::string requested_state = ConsumeDriveModeCommandState(rl);
+        if (!requested_state.empty())
+        {
+            return requested_state == "RLFSMStateRL_Locomotion" ? state_name_ : requested_state;
+        }
+        if (transition_percent == 1.0f)
         {
             return "RLFSMStateRL_Locomotion";
         }
@@ -1190,6 +1305,7 @@ public:
             rl.control.x = 0.0;
             rl.control.y = 0.0;
             rl.control.yaw = 0.0;
+            ClearDiscreteCommand(rl);
             return "RLFSMStatePassive";
         }
         else if (IsRetryCommand(rl))
@@ -1203,6 +1319,7 @@ public:
             rl.control.x = 0.0;
             rl.control.y = 0.0;
             rl.control.yaw = 0.0;
+            ClearDiscreteCommand(rl);
             return "RLFSMStateGetDown";
         }
         else if (rl.control.current_keyboard == Input::Keyboard::Num0 || rl.control.current_gamepad == Input::Gamepad::A)
@@ -1210,27 +1327,30 @@ public:
             rl.control.x = 0.0;
             rl.control.y = 0.0;
             rl.control.yaw = 0.0;
+            ClearDiscreteCommand(rl);
             return "RLFSMStateGetUp";
         }
-        else if (rl.control.current_keyboard == Input::Keyboard::Num1 || rl.control.current_gamepad == Input::Gamepad::RB_DPadUp)
+        else if (IsRLModeCommand(rl))
         {
             rl.control.x = 0.0;
             rl.control.y = 0.0;
             rl.control.yaw = 0.0;
-            rl.control.current_keyboard = rl.control.last_keyboard;
-            rl.control.current_gamepad = Input::Gamepad::None;
+            ClearDiscreteCommand(rl);
             return "RLFSMStateLowBarToRLTransition";
         }
-        else if (rl.control.current_keyboard == Input::Keyboard::Num2 || rl.control.current_gamepad == Input::Gamepad::RB_DPadRight)
+        else if (IsBridgeModeCommand(rl))
         {
-            rl.control.current_keyboard = rl.control.last_keyboard;
-            rl.control.current_gamepad = Input::Gamepad::None;
+            ClearDiscreteCommand(rl);
             return "RLFSMStateBridgeDrive";
         }
-        else if (rl.control.current_keyboard == Input::Keyboard::Num4 || rl.control.current_gamepad == Input::Gamepad::RB_DPadLeft)
+        else if (IsLowBarModeCommand(rl))
         {
-            rl.control.current_keyboard = rl.control.last_keyboard;
-            rl.control.current_gamepad = Input::Gamepad::None;
+            ClearDiscreteCommand(rl);
+            return state_name_;
+        }
+        else if (IsCarModeCommand(rl))
+        {
+            ClearDiscreteCommand(rl);
             return "RLFSMStateCarDrive";
         }
         return state_name_;
@@ -1331,6 +1451,7 @@ public:
     {
         if (rl.control.current_keyboard == Input::Keyboard::P || rl.control.current_gamepad == Input::Gamepad::LB_X)
         {
+            ClearDiscreteCommand(rl);
             return "RLFSMStatePassive";
         }
         else if (IsRetryCommand(rl))
@@ -1341,13 +1462,20 @@ public:
         }
         else if (IsGetDownCommand(rl))
         {
+            ClearDiscreteCommand(rl);
             return "RLFSMStateGetDown";
         }
         else if (rl.control.current_keyboard == Input::Keyboard::Num0 || rl.control.current_gamepad == Input::Gamepad::A || transition_failed)
         {
+            ClearDiscreteCommand(rl);
             return "RLFSMStateGetUp";
         }
-        else if (transition_percent == 1.0f)
+        const std::string requested_state = ConsumeDriveModeCommandState(rl);
+        if (!requested_state.empty())
+        {
+            return requested_state == "RLFSMStateRL_Locomotion" ? state_name_ : requested_state;
+        }
+        if (transition_percent == 1.0f)
         {
             return "RLFSMStateRL_Locomotion";
         }
@@ -1443,6 +1571,7 @@ public:
             rl.control.x = 0.0;
             rl.control.y = 0.0;
             rl.control.yaw = 0.0;
+            ClearDiscreteCommand(rl);
             return "RLFSMStatePassive";
         }
         else if (IsRetryCommand(rl))
@@ -1456,6 +1585,7 @@ public:
             rl.control.x = 0.0;
             rl.control.y = 0.0;
             rl.control.yaw = 0.0;
+            ClearDiscreteCommand(rl);
             return "RLFSMStateGetDown";
         }
         else if (rl.control.current_keyboard == Input::Keyboard::Num0 || rl.control.current_gamepad == Input::Gamepad::A)
@@ -1463,28 +1593,31 @@ public:
             rl.control.x = 0.0;
             rl.control.y = 0.0;
             rl.control.yaw = 0.0;
+            ClearDiscreteCommand(rl);
             return "RLFSMStateGetUp";
         }
-        else if (rl.control.current_keyboard == Input::Keyboard::Num1 || rl.control.current_gamepad == Input::Gamepad::RB_DPadUp)
+        else if (IsRLModeCommand(rl))
         {
             rl.control.x = 0.0;
             rl.control.y = 0.0;
             rl.control.yaw = 0.0;
-            rl.control.current_keyboard = rl.control.last_keyboard;
-            rl.control.current_gamepad = Input::Gamepad::None;
+            ClearDiscreteCommand(rl);
             return "RLFSMStateCarToRLTransition";
         }
-        else if (rl.control.current_keyboard == Input::Keyboard::Num2 || rl.control.current_gamepad == Input::Gamepad::RB_DPadRight)
+        else if (IsBridgeModeCommand(rl))
         {
-            rl.control.current_keyboard = rl.control.last_keyboard;
-            rl.control.current_gamepad = Input::Gamepad::None;
+            ClearDiscreteCommand(rl);
             return "RLFSMStateBridgeDrive";
         }
-        else if (rl.control.current_keyboard == Input::Keyboard::Num3 || rl.control.current_gamepad == Input::Gamepad::RB_DPadDown)
+        else if (IsLowBarModeCommand(rl))
         {
-            rl.control.current_keyboard = rl.control.last_keyboard;
-            rl.control.current_gamepad = Input::Gamepad::None;
+            ClearDiscreteCommand(rl);
             return "RLFSMStateLowBarDrive";
+        }
+        else if (IsCarModeCommand(rl))
+        {
+            ClearDiscreteCommand(rl);
+            return state_name_;
         }
         return state_name_;
     }
@@ -1584,6 +1717,7 @@ public:
     {
         if (rl.control.current_keyboard == Input::Keyboard::P || rl.control.current_gamepad == Input::Gamepad::LB_X)
         {
+            ClearDiscreteCommand(rl);
             return "RLFSMStatePassive";
         }
         else if (IsRetryCommand(rl))
@@ -1594,13 +1728,20 @@ public:
         }
         else if (IsGetDownCommand(rl))
         {
+            ClearDiscreteCommand(rl);
             return "RLFSMStateGetDown";
         }
         else if (rl.control.current_keyboard == Input::Keyboard::Num0 || rl.control.current_gamepad == Input::Gamepad::A || transition_failed)
         {
+            ClearDiscreteCommand(rl);
             return "RLFSMStateGetUp";
         }
-        else if (transition_percent == 1.0f)
+        const std::string requested_state = ConsumeDriveModeCommandState(rl);
+        if (!requested_state.empty())
+        {
+            return requested_state == "RLFSMStateRL_Locomotion" ? state_name_ : requested_state;
+        }
+        if (transition_percent == 1.0f)
         {
             return "RLFSMStateRL_Locomotion";
         }

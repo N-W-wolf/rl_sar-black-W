@@ -142,8 +142,10 @@ inline void ClearMotionCommand(RL &rl)
 
 inline void ClearDiscreteCommand(RL &rl)
 {
-    rl.control.current_keyboard = rl.control.last_keyboard;
+    rl.control.current_keyboard = Input::Keyboard::None;
+    rl.control.last_keyboard = Input::Keyboard::None;
     rl.control.current_gamepad = Input::Gamepad::None;
+    rl.control.last_gamepad = Input::Gamepad::None;
 }
 
 inline void ClearPendingPolicySwitch(RL &rl)
@@ -297,8 +299,7 @@ public:
             if (rl.control.current_keyboard == Input::Keyboard::T || rl.control.current_gamepad == Input::Gamepad::Y)
             {
                 const bool accepted = RequestNextPolicySwitch(rl);
-                rl.control.current_keyboard = rl.control.last_keyboard;
-                rl.control.current_gamepad = Input::Gamepad::None;
+                ClearDiscreteCommand(rl);
                 if (accepted)
                 {
                     const std::string switch_state = SelectPolicySwitchState(rl);
@@ -572,8 +573,7 @@ public:
         else if (rl.control.current_keyboard == Input::Keyboard::T || rl.control.current_gamepad == Input::Gamepad::Y)
         {
             const bool accepted = RequestNextPolicySwitch(rl);
-            rl.control.current_keyboard = rl.control.last_keyboard;
-            rl.control.current_gamepad = Input::Gamepad::None;
+            ClearDiscreteCommand(rl);
             if (accepted)
             {
                 const std::string switch_state = SelectPolicySwitchState(rl);

@@ -96,8 +96,10 @@ namespace Input
 
 struct Control
 {
-    Input::Keyboard current_keyboard, last_keyboard;
-    Input::Gamepad current_gamepad, last_gamepad;
+    Input::Keyboard current_keyboard = Input::Keyboard::None;
+    Input::Keyboard last_keyboard = Input::Keyboard::None;
+    Input::Gamepad current_gamepad = Input::Gamepad::None;
+    Input::Gamepad last_gamepad = Input::Gamepad::None;
 
     double x = 0.0;
     double y = 0.0;
