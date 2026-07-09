@@ -688,7 +688,7 @@ void RL::ReadYamlBase(std::string robot_path)
     catch (YAML::BadFile &e)
     {
         std::cout << LOGGER::ERROR << "The file '" << config_path << "' does not exist" << std::endl;
-        return;
+        throw;
     }
 
     this->params.dt = config["dt"].as<double>();
@@ -801,7 +801,7 @@ void RL::ReadYamlRL(std::string robot_path)
     catch (YAML::BadFile &e)
     {
         std::cout << LOGGER::ERROR << "The file '" << config_path << "' does not exist" << std::endl;
-        return;
+        throw;
     }
 
     this->params.model_name = config["model_name"].as<std::string>();

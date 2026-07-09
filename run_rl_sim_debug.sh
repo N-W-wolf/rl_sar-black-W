@@ -14,7 +14,7 @@ source install/setup.bash
 set -u
 
 RNAME="${1:-blackW}"
-POLICY_CONFIG="${2:-himloco}"
+POLICY_CONFIG="${2:-himloco_flat}"
 
 PARAM_PID=""
 UI_PID=""

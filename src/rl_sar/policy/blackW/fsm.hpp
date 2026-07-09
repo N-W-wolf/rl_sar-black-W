@@ -689,11 +689,11 @@ public:
             {
                 if (_output_dof_pos.defined() && _output_dof_pos.numel() > 0)
                 {
-                    fsm_command->motor_command.q[i] = rl.output_dof_pos[0][i].item<double>();
+                    fsm_command->motor_command.q[i] = _output_dof_pos[0][i].item<double>();
                 }
                 if (_output_dof_vel.defined() && _output_dof_vel.numel() > 0)
                 {
-                    fsm_command->motor_command.dq[i] = rl.output_dof_vel[0][i].item<double>();
+                    fsm_command->motor_command.dq[i] = _output_dof_vel[0][i].item<double>();
                 }
                 fsm_command->motor_command.kp[i] = rl.params.rl_kp[0][i].item<double>();
                 fsm_command->motor_command.kd[i] = rl.params.rl_kd[0][i].item<double>();
