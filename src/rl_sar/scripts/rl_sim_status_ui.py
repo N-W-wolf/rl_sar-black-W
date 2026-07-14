@@ -28,6 +28,8 @@ MODE_NAMES = {
     "RLFSMStateLowBarToRLTransition": "Low Bar to RL",
     "RLFSMStateCarDrive": "Car Drive",
     "RLFSMStateCarToRLTransition": "Car to RL",
+    "RLFSMStateEventChain": "Event Chain",
+    "RLFSMStateEventChainToRLTransition": "Event Chain to RL",
 }
 
 PALETTES = {
@@ -44,6 +46,8 @@ PALETTES = {
     "Low Bar to RL": ("#6d28d9", "#eee7ff"),
     "Car Drive": ("#0f766e", "#dbf4ef"),
     "Car to RL": ("#0f766e", "#dbf4ef"),
+    "Event Chain": ("#9f1239", "#ffe4e6"),
+    "Event Chain to RL": ("#9f1239", "#ffe4e6"),
 }
 
 COLORS = {

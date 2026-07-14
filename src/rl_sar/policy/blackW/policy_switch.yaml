@@ -11,6 +11,7 @@ blackW:
   policy_config_cycle:
     - himloco_flat
     - himloco_obstacle
+    - himloco_wall
     - himloco_stair
     #- himloco_test1
     #- himloco_test2

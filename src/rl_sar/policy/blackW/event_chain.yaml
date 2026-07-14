@@ -1,0 +1,155 @@
+# Copyright (c) 2024-2025 Ziqi Fan
+# SPDX-License-Identifier: Apache-2.0
+
+blackW:
+  # This chain is an initial position-control motion for a 0.30 m high,
+  # 0.05 m thick wall. Start with the robot square to the wall and the front
+  # wheels lightly touching it. The front legs fold first so the front skid
+  # plate rests on the smooth wall top; the rear wheels then push the body
+  # across while the front legs remain folded. Validate in simulation before
+  # trying it on hardware and tune distances for tire slip and wall contact.
+  interpolation: "smoothstep"
+  exit_to_rl_cycles: 300
+
+  # Wheel encoder distance and positive-forward motor directions. Wheel order:
+  # FL, FR, RL, RR. A drive event uses the average encoder distance of its group.
+  wheel_radius: 0.103
+  wheel_velocity_sign: [1.0, -1.0, 1.0, -1.0]
+
+  # Joint order:
+  # FL_hip, FL_thigh, FL_calf, FL_wheel,
+  # FR_hip, FR_thigh, FR_calf, FR_wheel,
+  # RL_hip, RL_thigh, RL_calf, RL_wheel,
+  # RR_hip, RR_thigh, RR_calf, RR_wheel
+  kp: [80.0, 80.0, 80.0, 0.0,
+       80.0, 80.0, 80.0, 0.0,
+       80.0, 80.0, 80.0, 0.0,
+       80.0, 80.0, 80.0, 0.0]
+
+  # Wheel kd follows the proven fixed-drive modes; with kp=0 it is also the
+  # wheel velocity-loop gain used by drive events.
+  kd: [3.0, 3.0, 3.0, 2.0,
+       3.0, 3.0, 3.0, 2.0,
+       3.0, 3.0, 3.0, 2.0,
+       3.0, 3.0, 3.0, 2.0]
+
+  # The measured joint position at mode entry is the implicit starting pose.
+  # At the 5 ms control period, 200 cycles are approximately one second.
+  events:
+    - name: "settle_at_wall"
+      type: "pose"
+      transition_cycles: 200
+      hold_cycles: 100
+      dof_pos: [ 0.00,  0.8014, -1.527, 0.0,
+                -0.00, -0.8014,  1.527, 0.0,
+                -0.00,  0.8014, -1.527, 0.0,
+                 0.00, -0.8014,  1.527, 0.0]
+
+    # Fold the front thighs to pi. In this pose the front wheel bottoms are
+    # approximately 0.41 m above the nominal ground plane.
+    - name: "tuck_front_above_wall"
+      type: "pose"
+      transition_cycles: 400
+      hold_cycles: 100
+      dof_pos: [ 0.00,  3.14, -2.50, 0.0,
+                -0.00, -3.14,  2.50, 0.0,
+                -0.00,  0.8014, -1.527, 0.0,
+                 0.00, -0.8014,  1.527, 0.0]
+
+    # With the front skid plate resting on the 0.30 m wall top, this rear-leg
+    # geometry targets a level trunk height of approximately 0.433 m. It also
+    # moves the rear support line forward from about -0.225 m to -0.061 m.
+    - name: "level_body_on_wall"
+      type: "pose"
+      transition_cycles: 160
+      hold_cycles: 50
+      dof_pos: [ 0.00,  3.14, -2.50, 0.0,
+                -0.00, -3.14,  2.50, 0.0,
+                -0.00,  1.55, -1.4, 0.0,
+                 0.00, -1.55,  1.4, 0.0]
+
+    # Keep the front legs folded and use the smooth skid plate/wall-top contact
+    # as an extra support. Positive distance drives the rear wheels forward.
+    - name: "rear_wheels_push_body_over_wall"
+      type: "drive"
+      wheel_group: "rear"
+      distance_m: 0.4
+      speed_mps: 0.8
+      timeout_cycles: 600
+      hold_cycles: 0
+
+    # As soon as the folded front wheels pass the far edge, reach forward and
+    # place them on the far-side floor. Crouch the rear legs at the same time to
+    # lower the body and move the rear support line closer to the body center.
+    - name: "lower_front_early"
+      type: "pose"
+      transition_cycles: 120
+      hold_cycles: 50
+      dof_pos: [ 0.00,  1.00, -1.85, 0.0,
+                -0.00, -1.00,  1.85, 0.0,
+                -0.00,  1.00, -1.85, 0.0,
+                 0.00, -1.00,  1.85, 0.0]
+
+    # Shorten the front legs while the rear legs keep their landed posture. The
+    # front target is approximately 3.5 cm shorter, creating a controlled
+    # forward pitch before the rear legs leave the ground.
+    - name: "lean_forward_for_rear_lift"
+      type: "pose"
+      transition_cycles: 120
+      hold_cycles: 50
+      dof_pos: [ 0.00,  1.20, -2.00, 0.0,
+                 0.00, -1.20,  2.00, 0.0,
+                 0.00,  1.00, -1.85, 0.0,
+                 0.00, -1.00,  1.85, 0.0]
+
+    # Rotate the rear wheels forward while lifting them. The simultaneous wheel
+    # motion lets the tires roll up the wall face instead of being forced through
+    # it by a pose-only interpolation. Positive distance uses the same verified
+    # forward direction as rear_wheels_push_body_over_wall.
+    - name: "rear_wheels_climb_onto_wall"
+      type: "pose_drive"
+      transition_cycles: 200
+      wheel_group: "rear"
+      distance_m: 0.75
+      speed_mps: 0.80
+      timeout_cycles: 500
+      hold_cycles: 100
+      dof_pos: [ 0.00,  1.20, -2.40, 0.0,
+                 0.00, -1.20,  2.40, 0.0,
+                -0.50, -0.15, -2.50, 0.0,
+                 0.50,  0.15,  2.50, 0.0]
+
+    # From the actual climb target, move each rear wheel backward and downward in
+    # body coordinates. The front wheels and smooth body skid should allow this
+    # contact reaction to move the body forward.
+    # 后腿向后蹬墙时，前轮同步低速向前滚动，避免前轮被位置事件的阻尼锁住，
+    # 使蹬墙推力转化为机身前移，而不是绕前轮向前翻转。
+    - name: "rear_kick_backward"
+      type: "pose_drive"
+      transition_cycles: 120
+      wheel_group: "front"
+      distance_m: 0.12
+      speed_mps: 0.20
+      timeout_cycles: 300
+      hold_cycles: 0
+      dof_pos: [ 0.00,  1.20, -2.40, 0.0,
+                 0.00, -1.20,  2.40, 0.0,
+                 0.00,  0.40, -2.50, 0.0,
+                 0.00, -0.40,  2.50, 0.0]
+
+    - name: "front_wheels_pull_after_rear_kick"
+      type: "drive"
+      wheel_group: "front"
+      distance_m: 0.32
+      speed_mps: 0.8
+      timeout_cycles: 600
+      hold_cycles: 100
+
+    - name: "restore_default_stand"
+      type: "pose"
+      transition_cycles: 500
+      hold_cycles: 0
+      dof_pos: [ 0.00,  0.8014, -1.527, 0.0,
+                 0.00, -0.8014,  1.527, 0.0,
+                 0.00,  0.8014, -1.527, 0.0,
+                 0.00, -0.8014,  1.527, 0.0]

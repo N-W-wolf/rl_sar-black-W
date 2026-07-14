@@ -31,6 +31,30 @@ struct BridgeDriveConfig
     std::vector<double> wheel_velocity_sign;
 };
 
+struct EventChainStep
+{
+    std::string name;
+    std::string type = "pose";
+    int transition_cycles = 1;
+    int hold_cycles = 0;
+    std::vector<double> dof_pos;
+    std::string wheel_group = "all";
+    double distance_m = 0.0;
+    double speed_mps = 0.1;
+    int timeout_cycles = 1;
+};
+
+struct EventChainConfig
+{
+    int exit_to_rl_cycles = 200;
+    std::string interpolation = "smoothstep";
+    double wheel_radius = 0.103;
+    std::vector<double> kp;
+    std::vector<double> kd;
+    std::vector<double> wheel_velocity_sign;
+    std::vector<EventChainStep> events;
+};
+
 inline std::vector<double> ReadBridgeVector(const YAML::Node &node)
 {
     std::vector<double> values;
@@ -131,6 +155,195 @@ inline BridgeDriveConfig ReadRetryConfig(const RL &rl)
     return ReadDriveConfig(rl, "retry_mode.yaml", "retry_default_dof_pos", "retry mode");
 }
 
+inline void ValidateEventChainVector(
+    const std::vector<double> &values,
+    int expected_size,
+    const std::string &field_name)
+{
+    if (static_cast<int>(values.size()) != expected_size)
+    {
+        throw std::runtime_error(field_name + " must contain exactly " + std::to_string(expected_size) + " values");
+    }
+    for (double value : values)
+    {
+        if (!std::isfinite(value))
+        {
+            throw std::runtime_error(field_name + " contains a non-finite value");
+        }
+    }
+}
+
+inline EventChainConfig ReadEventChainConfig(const RL &rl)
+{
+    const std::string config_path = std::string(CMAKE_CURRENT_SOURCE_DIR) +
+        "/policy/" + rl.robot_name + "/event_chain.yaml";
+    YAML::Node root = YAML::LoadFile(config_path);
+    YAML::Node node = root[rl.robot_name] ? root[rl.robot_name] : root;
+    if (!node || !node.IsMap())
+    {
+        throw std::runtime_error("event_chain.yaml must contain a map for " + rl.robot_name);
+    }
+
+    EventChainConfig config;
+    config.kp.resize(rl.params.num_of_dofs);
+    config.kd.resize(rl.params.num_of_dofs);
+    config.wheel_velocity_sign.assign(rl.params.wheel_indices.size(), 1.0);
+    for (int i = 0; i < rl.params.num_of_dofs; ++i)
+    {
+        config.kp[i] = rl.params.fixed_kp[0][i].item<double>();
+        config.kd[i] = rl.params.fixed_kd[0][i].item<double>();
+    }
+
+    if (node["exit_to_rl_cycles"])
+    {
+        config.exit_to_rl_cycles = node["exit_to_rl_cycles"].as<int>();
+        if (config.exit_to_rl_cycles < 1)
+        {
+            throw std::runtime_error("exit_to_rl_cycles must be at least 1");
+        }
+    }
+    if (node["interpolation"])
+    {
+        config.interpolation = node["interpolation"].as<std::string>();
+    }
+    if (config.interpolation != "linear" && config.interpolation != "smoothstep")
+    {
+        throw std::runtime_error("interpolation must be 'linear' or 'smoothstep'");
+    }
+    if (node["wheel_radius"])
+    {
+        config.wheel_radius = node["wheel_radius"].as<double>();
+    }
+    if (!std::isfinite(config.wheel_radius) || config.wheel_radius <= 0.0)
+    {
+        throw std::runtime_error("wheel_radius must be a finite positive value");
+    }
+
+    if (node["kp"])
+    {
+        config.kp = ReadBridgeVector(node["kp"]);
+    }
+    if (node["kd"])
+    {
+        config.kd = ReadBridgeVector(node["kd"]);
+    }
+    if (node["wheel_velocity_sign"])
+    {
+        config.wheel_velocity_sign = ReadBridgeVector(node["wheel_velocity_sign"]);
+    }
+    ValidateEventChainVector(config.kp, rl.params.num_of_dofs, "kp");
+    ValidateEventChainVector(config.kd, rl.params.num_of_dofs, "kd");
+    ValidateEventChainVector(
+        config.wheel_velocity_sign,
+        static_cast<int>(rl.params.wheel_indices.size()),
+        "wheel_velocity_sign");
+    for (int i = 0; i < rl.params.num_of_dofs; ++i)
+    {
+        if (config.kp[i] < 0.0 || config.kd[i] < 0.0)
+        {
+            throw std::runtime_error("kp and kd must not contain negative values");
+        }
+    }
+    for (double sign : config.wheel_velocity_sign)
+    {
+        if (std::abs(sign) < 1e-9)
+        {
+            throw std::runtime_error("wheel_velocity_sign must not contain zero");
+        }
+    }
+
+    YAML::Node events = node["events"];
+    if (!events || !events.IsSequence() || events.size() == 0)
+    {
+        throw std::runtime_error("events must be a non-empty sequence");
+    }
+
+    for (std::size_t index = 0; index < events.size(); ++index)
+    {
+        const YAML::Node event = events[index];
+        if (!event.IsMap())
+        {
+            throw std::runtime_error("events[" + std::to_string(index) + "] must be a map");
+        }
+
+        EventChainStep step;
+        step.name = event["name"] ? event["name"].as<std::string>() : "event_" + std::to_string(index + 1);
+        step.type = event["type"] ? event["type"].as<std::string>() : "pose";
+        step.hold_cycles = event["hold_cycles"] ? event["hold_cycles"].as<int>() : 0;
+        if (step.hold_cycles < 0)
+        {
+            throw std::runtime_error("events[" + std::to_string(index) + "].hold_cycles must not be negative");
+        }
+
+        const std::string field_prefix = "events[" + std::to_string(index) + "]";
+        const bool has_pose = step.type == "pose" || step.type == "pose_drive";
+        const bool has_drive = step.type == "drive" || step.type == "pose_drive";
+        if (!has_pose && !has_drive)
+        {
+            throw std::runtime_error(field_prefix + ".type must be 'pose', 'drive', or 'pose_drive'");
+        }
+
+        if (has_pose)
+        {
+            if (!event["transition_cycles"])
+            {
+                throw std::runtime_error(field_prefix + " is missing transition_cycles");
+            }
+            step.transition_cycles = event["transition_cycles"].as<int>();
+            if (step.transition_cycles < 1)
+            {
+                throw std::runtime_error(field_prefix + ".transition_cycles must be at least 1");
+            }
+            step.dof_pos = ReadBridgeVector(event["dof_pos"]);
+            ValidateEventChainVector(step.dof_pos, rl.params.num_of_dofs, field_prefix + ".dof_pos");
+        }
+        if (has_drive)
+        {
+            step.wheel_group = event["wheel_group"] ? event["wheel_group"].as<std::string>() : "all";
+            if (step.wheel_group != "front" && step.wheel_group != "rear" && step.wheel_group != "all")
+            {
+                throw std::runtime_error(field_prefix + ".wheel_group must be 'front', 'rear', or 'all'");
+            }
+            if (!event["distance_m"] || !event["speed_mps"] || !event["timeout_cycles"])
+            {
+                throw std::runtime_error(field_prefix + " drive event requires distance_m, speed_mps, and timeout_cycles");
+            }
+            step.distance_m = event["distance_m"].as<double>();
+            step.speed_mps = event["speed_mps"].as<double>();
+            step.timeout_cycles = event["timeout_cycles"].as<int>();
+            if (!std::isfinite(step.distance_m) || std::abs(step.distance_m) < 1e-9)
+            {
+                throw std::runtime_error(field_prefix + ".distance_m must be finite and non-zero");
+            }
+            if (!std::isfinite(step.speed_mps) || step.speed_mps <= 0.0)
+            {
+                throw std::runtime_error(field_prefix + ".speed_mps must be finite and positive");
+            }
+            if (step.timeout_cycles < 1)
+            {
+                throw std::runtime_error(field_prefix + ".timeout_cycles must be at least 1");
+            }
+            if (step.type == "pose_drive" && step.timeout_cycles < step.transition_cycles)
+            {
+                throw std::runtime_error(field_prefix + ".timeout_cycles must not be shorter than transition_cycles");
+            }
+        }
+        config.events.push_back(std::move(step));
+    }
+
+    return config;
+}
+
+inline double EventChainInterpolation(double phase, const std::string &interpolation)
+{
+    phase = clamp(phase, 0.0, 1.0);
+    if (interpolation == "smoothstep")
+    {
+        return phase * phase * (3.0 - 2.0 * phase);
+    }
+    return phase;
+}
+
 inline bool RequestNextPolicySwitch(RL &rl)
 {
     const std::string target_config = rl.GetNextPolicyConfig();
@@ -219,6 +432,12 @@ inline bool IsCarModeCommand(const RL &rl)
         rl.control.current_gamepad == Input::Gamepad::RB_DPadLeft;
 }
 
+inline bool IsEventChainModeCommand(const RL &rl)
+{
+    return rl.control.current_keyboard == Input::Keyboard::Num6 ||
+        rl.control.current_gamepad == Input::Gamepad::LB_DPadUp;
+}
+
 inline bool RememberDriveModeCommand(RL &rl)
 {
     Input::Keyboard target = Input::Keyboard::None;
@@ -237,6 +456,10 @@ inline bool RememberDriveModeCommand(RL &rl)
     else if (IsCarModeCommand(rl))
     {
         target = Input::Keyboard::Num4;
+    }
+    else if (IsEventChainModeCommand(rl))
+    {
+        target = Input::Keyboard::Num6;
     }
 
     if (target == Input::Keyboard::None)
@@ -289,6 +512,10 @@ inline std::string ConsumeDriveModeCommandState(RL &rl)
     else if (IsCarModeCommand(rl))
     {
         state = "RLFSMStateCarDrive";
+    }
+    else if (IsEventChainModeCommand(rl))
+    {
+        state = "RLFSMStateEventChain";
     }
 
     ClearDiscreteCommand(rl);
@@ -458,6 +685,11 @@ public:
             {
                 ClearDiscreteCommand(rl);
                 return "RLFSMStateCarDrive";
+            }
+            else if (IsEventChainModeCommand(rl))
+            {
+                ClearDiscreteCommand(rl);
+                return "RLFSMStateEventChain";
             }
             else if (IsRetryCommand(rl))
             {
@@ -770,6 +1002,11 @@ public:
         {
             ClearDiscreteCommand(rl);
             return "RLFSMStateCarDrive";
+        }
+        else if (IsEventChainModeCommand(rl))
+        {
+            ClearDiscreteCommand(rl);
+            return "RLFSMStateEventChain";
         }
         return state_name_;
     }
@@ -1087,6 +1324,11 @@ public:
             ClearDiscreteCommand(rl);
             return "RLFSMStateCarDrive";
         }
+        else if (IsEventChainModeCommand(rl))
+        {
+            ClearDiscreteCommand(rl);
+            return "RLFSMStateEventChain";
+        }
         return state_name_;
     }
 };
@@ -1352,6 +1594,11 @@ public:
         {
             ClearDiscreteCommand(rl);
             return "RLFSMStateCarDrive";
+        }
+        else if (IsEventChainModeCommand(rl))
+        {
+            ClearDiscreteCommand(rl);
+            return "RLFSMStateEventChain";
         }
         return state_name_;
     }
@@ -1619,6 +1866,11 @@ public:
             ClearDiscreteCommand(rl);
             return state_name_;
         }
+        else if (IsEventChainModeCommand(rl))
+        {
+            ClearDiscreteCommand(rl);
+            return "RLFSMStateEventChain";
+        }
         return state_name_;
     }
 };
@@ -1749,6 +2001,547 @@ public:
     }
 };
 
+class RLFSMStateEventChain : public RLFSMState
+{
+public:
+    RLFSMStateEventChain(RL *rl) : RLFSMState(*rl, "RLFSMStateEventChain") {}
+
+    EventChainConfig event_config;
+    bool config_failed = false;
+    bool execution_failed = false;
+    bool chain_complete = false;
+    bool event_initialized = false;
+    bool event_motion_complete = false;
+    std::size_t event_index = 0;
+    int event_cycle = 0;
+    int hold_cycle = 0;
+    std::vector<double> active_pose;
+    std::vector<double> segment_start_pos;
+    std::vector<double> drive_start_pos;
+
+    void Enter() override
+    {
+        config_failed = false;
+        execution_failed = false;
+        chain_complete = false;
+        event_initialized = false;
+        event_motion_complete = false;
+        event_index = 0;
+        event_cycle = 0;
+        hold_cycle = 0;
+        active_pose.clear();
+        segment_start_pos.clear();
+        drive_start_pos.clear();
+        rl.rl_init_done = false;
+        rl.ClearOutputQueues();
+        ClearMotionCommand(rl);
+        rl.control.navigation_mode = false;
+        rl.now_state = *fsm_state;
+
+        try
+        {
+            event_config = ReadEventChainConfig(rl);
+        }
+        catch (const std::exception &e)
+        {
+            std::cout << LOGGER::ERROR << "Failed to enter event chain mode: " << e.what() << std::endl;
+            config_failed = true;
+            return;
+        }
+
+        active_pose.resize(rl.params.num_of_dofs);
+        for (int i = 0; i < rl.params.num_of_dofs; ++i)
+        {
+            active_pose[i] = rl.now_state.motor_state.q[i];
+        }
+
+        std::cout << LOGGER::INFO << "Entered event chain mode with "
+                  << event_config.events.size() << " events."
+                  << " Press '1' or RB+DPadUp to return to RL locomotion."
+                  << std::endl;
+    }
+
+    bool IsWheelSelected(std::size_t wheel_id, const std::string &wheel_group) const
+    {
+        const std::size_t front_wheel_count = rl.params.wheel_indices.size() / 2;
+        return wheel_group == "all" ||
+            (wheel_group == "front" && wheel_id < front_wheel_count) ||
+            (wheel_group == "rear" && wheel_id >= front_wheel_count);
+    }
+
+    double WheelDirectionSign(std::size_t wheel_id) const
+    {
+        return event_config.wheel_velocity_sign[wheel_id] > 0.0 ? 1.0 : -1.0;
+    }
+
+    void ApplyLegPose(const std::vector<double> &target_pos)
+    {
+        for (int i = 0; i < rl.params.num_of_dofs; ++i)
+        {
+            if (IsWheelIndex(rl, i))
+            {
+                fsm_command->motor_command.q[i] = rl.now_state.motor_state.q[i];
+                fsm_command->motor_command.dq[i] = 0.0;
+                fsm_command->motor_command.kp[i] = 0.0;
+                fsm_command->motor_command.kd[i] = event_config.kd[i];
+                fsm_command->motor_command.tau[i] = 0.0;
+            }
+            else
+            {
+                fsm_command->motor_command.q[i] = target_pos[i];
+                fsm_command->motor_command.dq[i] = 0.0;
+                fsm_command->motor_command.kp[i] = event_config.kp[i];
+                fsm_command->motor_command.kd[i] = event_config.kd[i];
+                fsm_command->motor_command.tau[i] = 0.0;
+            }
+        }
+    }
+
+    void ApplyInterpolatedPose(const std::vector<double> &target_pos, double alpha)
+    {
+        for (int i = 0; i < rl.params.num_of_dofs; ++i)
+        {
+            if (IsWheelIndex(rl, i))
+            {
+                fsm_command->motor_command.q[i] = rl.now_state.motor_state.q[i];
+                fsm_command->motor_command.dq[i] = 0.0;
+                fsm_command->motor_command.kp[i] = 0.0;
+                fsm_command->motor_command.kd[i] = event_config.kd[i];
+                fsm_command->motor_command.tau[i] = 0.0;
+            }
+            else
+            {
+                fsm_command->motor_command.q[i] =
+                    (1.0 - alpha) * segment_start_pos[i] + alpha * target_pos[i];
+                fsm_command->motor_command.dq[i] = 0.0;
+                fsm_command->motor_command.kp[i] = event_config.kp[i];
+                fsm_command->motor_command.kd[i] = event_config.kd[i];
+                fsm_command->motor_command.tau[i] = 0.0;
+            }
+        }
+    }
+
+    void InitializeEvent(const EventChainStep &event)
+    {
+        event_initialized = true;
+        event_motion_complete = false;
+        event_cycle = 0;
+        hold_cycle = 0;
+        if (event.type == "pose" || event.type == "pose_drive")
+        {
+            segment_start_pos = active_pose;
+        }
+
+        if (event.type == "drive" || event.type == "pose_drive")
+        {
+            drive_start_pos.resize(rl.params.wheel_indices.size());
+            for (std::size_t wheel_id = 0; wheel_id < rl.params.wheel_indices.size(); ++wheel_id)
+            {
+                drive_start_pos[wheel_id] =
+                    rl.now_state.motor_state.q[rl.params.wheel_indices[wheel_id]];
+            }
+        }
+    }
+
+    double GetDriveDistance(const EventChainStep &event) const
+    {
+        double distance_sum = 0.0;
+        int selected_wheels = 0;
+        for (std::size_t wheel_id = 0; wheel_id < rl.params.wheel_indices.size(); ++wheel_id)
+        {
+            if (!IsWheelSelected(wheel_id, event.wheel_group))
+            {
+                continue;
+            }
+            const int joint_index = rl.params.wheel_indices[wheel_id];
+            const double wheel_delta =
+                rl.now_state.motor_state.q[joint_index] - drive_start_pos[wheel_id];
+            distance_sum += WheelDirectionSign(wheel_id) * wheel_delta * event_config.wheel_radius;
+            ++selected_wheels;
+        }
+        return selected_wheels > 0 ? distance_sum / static_cast<double>(selected_wheels) : 0.0;
+    }
+
+    void ApplyWheelDrive(const EventChainStep &event)
+    {
+        const double travel_direction = event.distance_m > 0.0 ? 1.0 : -1.0;
+        const double wheel_velocity = travel_direction * event.speed_mps / event_config.wheel_radius;
+        for (std::size_t wheel_id = 0; wheel_id < rl.params.wheel_indices.size(); ++wheel_id)
+        {
+            if (!IsWheelSelected(wheel_id, event.wheel_group))
+            {
+                continue;
+            }
+            const int joint_index = rl.params.wheel_indices[wheel_id];
+            fsm_command->motor_command.dq[joint_index] =
+                WheelDirectionSign(wheel_id) * wheel_velocity;
+        }
+    }
+
+    void ApplyDrive(const EventChainStep &event)
+    {
+        ApplyLegPose(active_pose);
+        ApplyWheelDrive(event);
+    }
+
+    bool DriveTargetReached(double traveled_m, double target_m) const
+    {
+        return target_m > 0.0 ? traveled_m >= target_m : traveled_m <= target_m;
+    }
+
+    void FinishOrAdvanceEvent(const EventChainStep &event)
+    {
+        if (hold_cycle < event.hold_cycles)
+        {
+            ++hold_cycle;
+            return;
+        }
+        if (event_index + 1 >= event_config.events.size())
+        {
+            chain_complete = true;
+            std::cout << std::endl << LOGGER::INFO << "Event chain finished." << std::endl;
+            return;
+        }
+        ++event_index;
+        event_initialized = false;
+        event_motion_complete = false;
+        event_cycle = 0;
+        hold_cycle = 0;
+    }
+
+    void Run() override
+    {
+        ClearMotionCommand(rl);
+        rl.control.navigation_mode = false;
+        rl.now_state = *fsm_state;
+        if (config_failed || execution_failed)
+        {
+            return;
+        }
+
+        if (chain_complete)
+        {
+            ApplyLegPose(active_pose);
+            std::cout << "\r\033[K" << std::flush << LOGGER::INFO
+                      << "Event chain complete; holding final pose" << std::flush;
+            return;
+        }
+
+        const EventChainStep &event = event_config.events[event_index];
+        if (!event_initialized)
+        {
+            InitializeEvent(event);
+        }
+
+        if (event.type == "pose")
+        {
+            if (!event_motion_complete)
+            {
+                ++event_cycle;
+                const double phase = static_cast<double>(event_cycle) /
+                    static_cast<double>(event.transition_cycles);
+                const double alpha = EventChainInterpolation(phase, event_config.interpolation);
+                ApplyInterpolatedPose(event.dof_pos, alpha);
+                if (event_cycle >= event.transition_cycles)
+                {
+                    active_pose = event.dof_pos;
+                    event_motion_complete = true;
+                }
+
+                std::cout << "\r\033[K" << std::flush << LOGGER::INFO
+                          << "Event chain " << (event_index + 1) << "/" << event_config.events.size()
+                          << " [" << event.name << "] pose "
+                          << std::fixed << std::setprecision(2) << phase * 100.0 << "%"
+                          << std::flush;
+            }
+            else
+            {
+                ApplyLegPose(active_pose);
+            }
+        }
+        else if (event.type == "pose_drive")
+        {
+            if (!event_motion_complete)
+            {
+                const double traveled_m = GetDriveDistance(event);
+                const bool drive_complete = DriveTargetReached(traveled_m, event.distance_m);
+                const bool pose_complete_before_cycle = event_cycle >= event.transition_cycles;
+                if ((!drive_complete || !pose_complete_before_cycle) && event_cycle >= event.timeout_cycles)
+                {
+                    ApplyLegPose(active_pose);
+                    execution_failed = true;
+                    std::cout << std::endl << LOGGER::ERROR
+                              << "Event chain pose-drive event [" << event.name << "] timed out after "
+                              << event.timeout_cycles << " cycles; traveled " << traveled_m
+                              << " m of " << event.distance_m << " m." << std::endl;
+                    return;
+                }
+
+                ++event_cycle;
+                const double phase = std::min(
+                    static_cast<double>(event_cycle) / static_cast<double>(event.transition_cycles),
+                    1.0);
+                const double alpha = EventChainInterpolation(phase, event_config.interpolation);
+                ApplyInterpolatedPose(event.dof_pos, alpha);
+                if (event_cycle >= event.transition_cycles)
+                {
+                    active_pose = event.dof_pos;
+                }
+                if (!drive_complete)
+                {
+                    ApplyWheelDrive(event);
+                }
+
+                const bool pose_complete = event_cycle >= event.transition_cycles;
+                event_motion_complete = pose_complete && drive_complete;
+                std::cout << "\r\033[K" << std::flush << LOGGER::INFO
+                          << "Event chain " << (event_index + 1) << "/" << event_config.events.size()
+                          << " [" << event.name << "] pose-drive " << event.wheel_group << " pose "
+                          << std::fixed << std::setprecision(1) << phase * 100.0 << "% distance "
+                          << std::setprecision(3) << traveled_m << "/" << event.distance_m << " m"
+                          << std::flush;
+            }
+            else
+            {
+                ApplyLegPose(active_pose);
+            }
+        }
+        else
+        {
+            const double traveled_m = GetDriveDistance(event);
+            if (DriveTargetReached(traveled_m, event.distance_m))
+            {
+                ApplyLegPose(active_pose);
+                event_motion_complete = true;
+            }
+            else if (event_cycle >= event.timeout_cycles)
+            {
+                ApplyLegPose(active_pose);
+                execution_failed = true;
+                std::cout << std::endl << LOGGER::ERROR
+                          << "Event chain drive event [" << event.name << "] timed out after "
+                          << event.timeout_cycles << " cycles; traveled " << traveled_m
+                          << " m of " << event.distance_m << " m." << std::endl;
+                return;
+            }
+            else
+            {
+                ApplyDrive(event);
+                ++event_cycle;
+            }
+
+            std::cout << "\r\033[K" << std::flush << LOGGER::INFO
+                      << "Event chain " << (event_index + 1) << "/" << event_config.events.size()
+                      << " [" << event.name << "] drive " << event.wheel_group << " "
+                      << std::fixed << std::setprecision(3) << traveled_m
+                      << "/" << event.distance_m << " m" << std::flush;
+        }
+
+        if (!event_motion_complete)
+        {
+            return;
+        }
+        FinishOrAdvanceEvent(event);
+    }
+
+    void Exit() override
+    {
+        ClearMotionCommand(rl);
+    }
+
+    std::string CheckChange() override
+    {
+        if (config_failed || execution_failed)
+        {
+            return "RLFSMStateGetUp";
+        }
+        if (rl.control.current_keyboard == Input::Keyboard::P || rl.control.current_gamepad == Input::Gamepad::LB_X)
+        {
+            ClearDiscreteCommand(rl);
+            return "RLFSMStatePassive";
+        }
+        if (IsRetryCommand(rl))
+        {
+            ClearMotionCommand(rl);
+            ClearDiscreteCommand(rl);
+            return "RLFSMStateRetry";
+        }
+        if (IsGetDownCommand(rl))
+        {
+            ClearDiscreteCommand(rl);
+            return "RLFSMStateGetDown";
+        }
+        if (rl.control.current_keyboard == Input::Keyboard::Num0 || rl.control.current_gamepad == Input::Gamepad::A)
+        {
+            ClearDiscreteCommand(rl);
+            return "RLFSMStateGetUp";
+        }
+        if (IsRLModeCommand(rl))
+        {
+            ClearDiscreteCommand(rl);
+            return "RLFSMStateEventChainToRLTransition";
+        }
+        if (IsBridgeModeCommand(rl))
+        {
+            ClearDiscreteCommand(rl);
+            return "RLFSMStateBridgeDrive";
+        }
+        if (IsLowBarModeCommand(rl))
+        {
+            ClearDiscreteCommand(rl);
+            return "RLFSMStateLowBarDrive";
+        }
+        if (IsCarModeCommand(rl))
+        {
+            ClearDiscreteCommand(rl);
+            return "RLFSMStateCarDrive";
+        }
+        if (IsEventChainModeCommand(rl))
+        {
+            ClearDiscreteCommand(rl);
+        }
+        return state_name_;
+    }
+};
+
+class RLFSMStateEventChainToRLTransition : public RLFSMState
+{
+public:
+    RLFSMStateEventChainToRLTransition(RL *rl)
+        : RLFSMState(*rl, "RLFSMStateEventChainToRLTransition") {}
+
+    EventChainConfig event_config;
+    bool transition_failed = false;
+    int transition_cycle = 0;
+    std::vector<double> start_pos;
+    torch::Tensor target_dof_pos;
+
+    void Enter() override
+    {
+        transition_failed = false;
+        transition_cycle = 0;
+        start_pos.clear();
+        target_dof_pos = torch::Tensor();
+        rl.rl_init_done = false;
+        rl.ClearOutputQueues();
+        ClearMotionCommand(rl);
+        rl.control.navigation_mode = false;
+        rl.now_state = *fsm_state;
+
+        if (rl.config_name.empty())
+        {
+            rl.config_name = "himloco";
+        }
+
+        try
+        {
+            event_config = ReadEventChainConfig(rl);
+            target_dof_pos = rl.ReadPolicyDefaultDofPos(rl.robot_name + "/" + rl.config_name);
+            if (target_dof_pos.size(1) != rl.params.num_of_dofs)
+            {
+                throw std::runtime_error("target default_dof_pos size does not match num_of_dofs");
+            }
+        }
+        catch (const std::exception &e)
+        {
+            std::cout << LOGGER::ERROR << "Event-chain-to-RL transition failed: " << e.what() << std::endl;
+            transition_failed = true;
+            return;
+        }
+
+        start_pos.resize(rl.params.num_of_dofs);
+        for (int i = 0; i < rl.params.num_of_dofs; ++i)
+        {
+            start_pos[i] = rl.now_state.motor_state.q[i];
+        }
+
+        std::cout << LOGGER::INFO << "Event chain returning to RL pose: " << rl.config_name << std::endl;
+    }
+
+    void Run() override
+    {
+        ClearMotionCommand(rl);
+        rl.control.navigation_mode = false;
+        if (transition_failed)
+        {
+            return;
+        }
+
+        rl.now_state = *fsm_state;
+        if (transition_cycle < event_config.exit_to_rl_cycles)
+        {
+            ++transition_cycle;
+        }
+        const double phase = static_cast<double>(transition_cycle) /
+            static_cast<double>(event_config.exit_to_rl_cycles);
+        const double alpha = EventChainInterpolation(phase, event_config.interpolation);
+
+        for (int i = 0; i < rl.params.num_of_dofs; ++i)
+        {
+            if (IsWheelIndex(rl, i))
+            {
+                fsm_command->motor_command.q[i] = rl.now_state.motor_state.q[i];
+                fsm_command->motor_command.dq[i] = 0.0;
+                fsm_command->motor_command.kp[i] = 0.0;
+                fsm_command->motor_command.kd[i] = event_config.kd[i];
+                fsm_command->motor_command.tau[i] = 0.0;
+            }
+            else
+            {
+                const double target_pos = target_dof_pos[0][i].item<double>();
+                fsm_command->motor_command.q[i] = (1.0 - alpha) * start_pos[i] + alpha * target_pos;
+                fsm_command->motor_command.dq[i] = 0.0;
+                fsm_command->motor_command.kp[i] = event_config.kp[i];
+                fsm_command->motor_command.kd[i] = event_config.kd[i];
+                fsm_command->motor_command.tau[i] = 0.0;
+            }
+        }
+
+        std::cout << "\r\033[K" << std::flush << LOGGER::INFO
+                  << "Event chain to RL pose " << std::fixed << std::setprecision(2)
+                  << phase * 100.0 << "%" << std::flush;
+    }
+
+    void Exit() override {}
+
+    std::string CheckChange() override
+    {
+        if (rl.control.current_keyboard == Input::Keyboard::P || rl.control.current_gamepad == Input::Gamepad::LB_X)
+        {
+            ClearDiscreteCommand(rl);
+            return "RLFSMStatePassive";
+        }
+        if (IsRetryCommand(rl))
+        {
+            ClearMotionCommand(rl);
+            ClearDiscreteCommand(rl);
+            return "RLFSMStateRetry";
+        }
+        if (IsGetDownCommand(rl))
+        {
+            ClearDiscreteCommand(rl);
+            return "RLFSMStateGetDown";
+        }
+        if (rl.control.current_keyboard == Input::Keyboard::Num0 ||
+            rl.control.current_gamepad == Input::Gamepad::A || transition_failed)
+        {
+            ClearDiscreteCommand(rl);
+            return "RLFSMStateGetUp";
+        }
+
+        const std::string requested_state = ConsumeDriveModeCommandState(rl);
+        if (!requested_state.empty())
+        {
+            return requested_state == "RLFSMStateRL_Locomotion" ? state_name_ : requested_state;
+        }
+        if (transition_cycle >= event_config.exit_to_rl_cycles)
+        {
+            return "RLFSMStateRL_Locomotion";
+        }
+        return state_name_;
+    }
+};
+
 } // namespace blackw_fsm
 
 class BLACKWFSMFactory : public FSMFactory
@@ -1784,6 +2577,10 @@ public:
             return std::make_shared<blackw_fsm::RLFSMStateCarDrive>(rl);
         else if (state_name == "RLFSMStateCarToRLTransition")
             return std::make_shared<blackw_fsm::RLFSMStateCarToRLTransition>(rl);
+        else if (state_name == "RLFSMStateEventChain")
+            return std::make_shared<blackw_fsm::RLFSMStateEventChain>(rl);
+        else if (state_name == "RLFSMStateEventChainToRLTransition")
+            return std::make_shared<blackw_fsm::RLFSMStateEventChainToRLTransition>(rl);
         return nullptr;
     }
     std::string GetType() const override { return "blackW"; }
@@ -1802,7 +2599,9 @@ public:
             "RLFSMStateLowBarDrive",
             "RLFSMStateLowBarToRLTransition",
             "RLFSMStateCarDrive",
-            "RLFSMStateCarToRLTransition"
+            "RLFSMStateCarToRLTransition",
+            "RLFSMStateEventChain",
+            "RLFSMStateEventChainToRLTransition"
         };
     }
     std::string GetInitialState() const override { return initial_state_; }

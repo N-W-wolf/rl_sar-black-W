@@ -229,6 +229,7 @@ ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: 'shutdown'}"
 | `2` | `blackW` 下进入固定姿态桥模式 |
 | `3` | `blackW` 下进入限高杆模式 |
 | `4` | `blackW` 下进入固定姿态车模式 |
+| `6` | `blackW` 下进入事件链姿态模式 |
 
 ## 手柄控制
 
@@ -246,6 +247,7 @@ ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: 'shutdown'}"
 | `RB + DPadRight` | `blackW` 下进入固定姿态桥模式 |
 | `RB + DPadDown` | `blackW` 下进入限高杆模式 |
 | `RB + DPadLeft` | `blackW` 下进入固定姿态车模式 |
+| `LB + DPadUp` | `blackW` 下进入事件链姿态模式 |
 | `X` | 切换导航模式 |
 | `Y` | `black`/`blackW` 下按 `policy_config_cycle` 切换模型 |
 | `LY/LX/RX` | 前后、左右、偏航速度 |
@@ -330,6 +332,7 @@ ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: '5'}"
 - `2` 或 `RB + DPadRight`：进入桥模式。
 - `3` 或 `RB + DPadDown`：进入限高杆模式。
 - `4` 或 `RB + DPadLeft`：进入固定姿态车模式。
+- `6` 或 `LB + DPadUp`：进入事件链姿态模式。
 - `5` 或 `B`：进入重试搬运模式。
 - `0` 或 `A`：回到 `GetUp`。
 - `9` 或 `RB + B`：回到 `GetDown`。
@@ -338,6 +341,66 @@ ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: '5'}"
 桥模式、限高杆模式和固定姿态车模式之间互相切换时不会主动清零 `x/yaw`，姿态插值过程中轮子会继续按当前命令行驶。切回 RL、`GetUp`、`GetDown` 或 passive 时会清零速度命令。
 
 桥模式参数位于 [bridge_drive.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/bridge_drive.yaml)，限高杆模式参数位于 [low_bar_drive.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/low_bar_drive.yaml)，固定姿态车模式参数位于 [car_drive.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/car_drive.yaml)，重试搬运模式参数位于 [retry_mode.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/retry_mode.yaml)。固定姿态车类模式主要配置包括固定姿态、进入姿态的 `prepare_cycles`、回到 RL 默认姿态的 `exit_to_rl_cycles`、腿部 `kp/kd`、轮速限制和轮速方向 `wheel_velocity_sign`；重试搬运模式主要配置包括 `retry_default_dof_pos`、进入姿态的 `prepare_cycles` 和 `kp/kd`。首次实测前建议先悬空确认轮速方向，再低速上地调试。
+
+## blackW 事件链姿态模式
+
+事件链模式不运行 RL 模型。进入时以当前实测关节位置作为隐式初始姿态，然后按照 [event_chain.yaml](/home/windnotebook/PROJECT/RoboCon/Dog/rl_sar/src/rl_sar/policy/blackW/event_chain.yaml) 中 `events` 的顺序执行。事件可以是腿部姿态插值 `pose`、按轮组行驶指定编码器距离的 `drive`，或同时执行两者的 `pose_drive`；最后一个事件完成后会持续保持末姿态，直到人工切换模式。
+
+进入方式：
+
+```bash
+# 键盘 6 或手柄 LB + DPadUp
+ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: '6'}"
+```
+
+主要配置格式：
+
+```yaml
+blackW:
+  interpolation: "smoothstep"  # 也可使用 "linear"
+  exit_to_rl_cycles: 200
+  wheel_radius: 0.103
+  wheel_velocity_sign: [1.0, -1.0, 1.0, -1.0]
+  kp: [/* 16 个关节 */]
+  kd: [/* 16 个关节 */]
+  events:
+    - name: "pose_1"
+      type: "pose"
+      transition_cycles: 200
+      hold_cycles: 100
+      dof_pos: [/* 16 个关节目标位置 */]
+    - name: "rear_drive"
+      type: "drive"
+      wheel_group: "rear"       # front、rear 或 all
+      distance_m: 0.30           # 正数前进，负数后退
+      speed_mps: 0.08            # 使用正数，方向由 distance_m 决定
+      timeout_cycles: 1200
+      hold_cycles: 0
+    - name: "rear_climb"
+      type: "pose_drive"
+      transition_cycles: 200
+      wheel_group: "rear"
+      distance_m: 0.12
+      speed_mps: 0.10
+      timeout_cycles: 500
+      hold_cycles: 50
+      dof_pos: [/* 16 个关节目标位置 */]
+```
+
+`blackW` 的控制周期为 `5 ms`，因此 `200` 个周期约为 `1 s`。`type` 省略时仍按 `pose` 解析，以兼容旧配置。每个含姿态的事件，其 `dof_pos` 必须严格包含 16 个有限数值；每个含轮驱的事件必须配置非零 `distance_m`、正数 `speed_mps` 和正数 `timeout_cycles`。`pose_drive` 会持续插值姿态并驱动指定轮组，直到姿态周期和编码器距离都完成；其超时不能短于姿态插值周期。如果显式配置 `kp` 或 `kd`，它们也必须包含 16 个有限非负数值。字段非法、事件为空或数组长度错误时，控制器会拒绝执行事件链并返回 `GetUp`。
+
+轮关节索引为 `3/7/11/15`。姿态事件中对应的轮位置只是占位值，控制器不会对轮子执行绝对位置插值，而是保持 `dq=0`、`kp=0` 并使用配置的 `kd` 阻尼。行驶事件保持最近一次腿部目标姿态，通过 `wheel_velocity_sign` 统一正向，并用所选轮组的平均编码器转角乘 `wheel_radius` 判断距离；达到距离后轮速立即归零，超时则中止事件链并返回 `GetUp`。该距离不补偿轮胎打滑，实机需根据地面和障碍接触情况调整。
+
+仓库中的默认链条是一套针对 `0.30 m` 高、`0.05 m` 厚墙体的初始动作参数，使用经机构确认安全的前后大腿 `±3.14 rad` 收腿姿态。执行前需要让机器人正对墙体、前轮轻触墙面；前腿收起后让机身前部滑板搭在光滑墙顶，由后轮向前推动前半机身越墙，前轮在远端落地后再牵引收起的后腿越墙。它仍属于需要仿真和低速实机标定的机构动作：首次运行应急停在手，重点核对轮方向、收腿净空、机身俯仰以及各段 `distance_m`，不要直接按默认参数全速无人值守执行。
+
+退出方式：
+
+- `1` 或 `RB + DPadUp`：平滑回到当前 RL 策略的 `default_dof_pos`，然后进入 RL locomotion。
+- `2/3/4`：切换到桥、限高杆或固定姿态车模式。
+- `0` 或手柄 `A`：进入 `GetUp`。
+- `9` 或 `RB + B`：进入 `GetDown`。
+- `5` 或手柄 `B`：进入重试搬运模式。
+- `P` 或 `LB + X`：进入 passive。
 
 ### 新增可切换模型
 
