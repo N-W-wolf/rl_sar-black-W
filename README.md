@@ -238,8 +238,8 @@ ros2 topic pub --once /rl_sim/debug_key std_msgs/msg/String "{data: 'shutdown'}"
 | 手柄 | 作用 |
 |---|---|
 | `A` | 从当前初始姿态切到 `GetUp` |
-| `B` | `blackW` 下进入重试搬运模式 |
-| `RB + B` | `blackW` 下回到初始姿态 |
+| `B` | 进入重试搬运模式 |
+| `RB + B` | 回到初始姿态 |
 | `RB + DPadUp` | 基础 locomotion |
 | `LB + X` | 电机 passive 模式 |
 | `RB + Y` | 重置仿真 |
